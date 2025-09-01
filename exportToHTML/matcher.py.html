@@ -1,0 +1,224 @@
+<html>
+<head>
+<title>matcher.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #808080;}
+.s4 { color: #6897bb;}
+.s5 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+matcher.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">dataclasses </span><span class="s0">import </span><span class="s1">dataclass</span>
+<span class="s0">from </span><span class="s1">dataclasses </span><span class="s0">import </span><span class="s1">field</span>
+
+<span class="s0">from </span><span class="s1">.converters </span><span class="s0">import </span><span class="s1">ValidationError</span>
+<span class="s0">from </span><span class="s1">.exceptions </span><span class="s0">import </span><span class="s1">NoMatch</span>
+<span class="s0">from </span><span class="s1">.exceptions </span><span class="s0">import </span><span class="s1">RequestAliasRedirect</span>
+<span class="s0">from </span><span class="s1">.exceptions </span><span class="s0">import </span><span class="s1">RequestPath</span>
+<span class="s0">from </span><span class="s1">.rules </span><span class="s0">import </span><span class="s1">Rule</span>
+<span class="s0">from </span><span class="s1">.rules </span><span class="s0">import </span><span class="s1">RulePart</span>
+
+
+<span class="s0">class </span><span class="s1">SlashRequired(Exception):</span>
+    <span class="s0">pass</span>
+
+
+<span class="s1">@dataclass</span>
+<span class="s0">class </span><span class="s1">State:</span>
+    <span class="s2">&quot;&quot;&quot;A representation of a rule state. 
+ 
+    This includes the *rules* that correspond to the state and the 
+    possible *static* and *dynamic* transitions to the next state. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">dynamic: list[tuple[RulePart</span><span class="s0">, </span><span class="s1">State]] = field(default_factory=list)</span>
+    <span class="s1">rules: list[Rule] = field(default_factory=list)</span>
+    <span class="s1">static: dict[str</span><span class="s0">, </span><span class="s1">State] = field(default_factory=dict)</span>
+
+
+<span class="s0">class </span><span class="s1">StateMachineMatcher:</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">merge_slashes: bool) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._root = State()</span>
+        <span class="s1">self.merge_slashes = merge_slashes</span>
+
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">rule: Rule) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">state = self._root</span>
+        <span class="s0">for </span><span class="s1">part </span><span class="s0">in </span><span class="s1">rule._parts:</span>
+            <span class="s0">if </span><span class="s1">part.static:</span>
+                <span class="s1">state.static.setdefault(part.content</span><span class="s0">, </span><span class="s1">State())</span>
+                <span class="s1">state = state.static[part.content]</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s0">for </span><span class="s1">test_part</span><span class="s0">, </span><span class="s1">new_state </span><span class="s0">in </span><span class="s1">state.dynamic:</span>
+                    <span class="s0">if </span><span class="s1">test_part == part:</span>
+                        <span class="s1">state = new_state</span>
+                        <span class="s0">break</span>
+                <span class="s0">else</span><span class="s1">:</span>
+                    <span class="s1">new_state = State()</span>
+                    <span class="s1">state.dynamic.append((part</span><span class="s0">, </span><span class="s1">new_state))</span>
+                    <span class="s1">state = new_state</span>
+        <span class="s1">state.rules.append(rule)</span>
+
+    <span class="s0">def </span><span class="s1">update(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s3"># For every state the dynamic transitions should be sorted by</span>
+        <span class="s3"># the weight of the transition</span>
+        <span class="s1">state = self._root</span>
+
+        <span class="s0">def </span><span class="s1">_update_state(state: State) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+            <span class="s1">state.dynamic.sort(key=</span><span class="s0">lambda </span><span class="s1">entry: entry[</span><span class="s4">0</span><span class="s1">].weight)</span>
+            <span class="s0">for </span><span class="s1">new_state </span><span class="s0">in </span><span class="s1">state.static.values():</span>
+                <span class="s1">_update_state(new_state)</span>
+            <span class="s0">for </span><span class="s1">_</span><span class="s0">, </span><span class="s1">new_state </span><span class="s0">in </span><span class="s1">state.dynamic:</span>
+                <span class="s1">_update_state(new_state)</span>
+
+        <span class="s1">_update_state(state)</span>
+
+    <span class="s0">def </span><span class="s1">match(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">domain: str</span><span class="s0">, </span><span class="s1">path: str</span><span class="s0">, </span><span class="s1">method: str</span><span class="s0">, </span><span class="s1">websocket: bool</span>
+    <span class="s1">) -&gt; tuple[Rule</span><span class="s0">, </span><span class="s1">t.MutableMapping[str</span><span class="s0">, </span><span class="s1">t.Any]]:</span>
+        <span class="s3"># To match to a rule we need to start at the root state and</span>
+        <span class="s3"># try to follow the transitions until we find a match, or find</span>
+        <span class="s3"># there is no transition to follow.</span>
+
+        <span class="s1">have_match_for = set()</span>
+        <span class="s1">websocket_mismatch = </span><span class="s0">False</span>
+
+        <span class="s0">def </span><span class="s1">_match(</span>
+            <span class="s1">state: State</span><span class="s0">, </span><span class="s1">parts: list[str]</span><span class="s0">, </span><span class="s1">values: list[str]</span>
+        <span class="s1">) -&gt; tuple[Rule</span><span class="s0">, </span><span class="s1">list[str]] | </span><span class="s0">None</span><span class="s1">:</span>
+            <span class="s3"># This function is meant to be called recursively, and will attempt</span>
+            <span class="s3"># to match the head part to the state's transitions.</span>
+            <span class="s0">nonlocal </span><span class="s1">have_match_for</span><span class="s0">, </span><span class="s1">websocket_mismatch</span>
+
+            <span class="s3"># The base case is when all parts have been matched via</span>
+            <span class="s3"># transitions. Hence if there is a rule with methods &amp;</span>
+            <span class="s3"># websocket that work return it and the dynamic values</span>
+            <span class="s3"># extracted.</span>
+            <span class="s0">if </span><span class="s1">parts == []:</span>
+                <span class="s0">for </span><span class="s1">rule </span><span class="s0">in </span><span class="s1">state.rules:</span>
+                    <span class="s0">if </span><span class="s1">rule.methods </span><span class="s0">is not None and </span><span class="s1">method </span><span class="s0">not in </span><span class="s1">rule.methods:</span>
+                        <span class="s1">have_match_for.update(rule.methods)</span>
+                    <span class="s0">elif </span><span class="s1">rule.websocket != websocket:</span>
+                        <span class="s1">websocket_mismatch = </span><span class="s0">True</span>
+                    <span class="s0">else</span><span class="s1">:</span>
+                        <span class="s0">return </span><span class="s1">rule</span><span class="s0">, </span><span class="s1">values</span>
+
+                <span class="s3"># Test if there is a match with this path with a</span>
+                <span class="s3"># trailing slash, if so raise an exception to report</span>
+                <span class="s3"># that matching is possible with an additional slash</span>
+                <span class="s0">if </span><span class="s5">&quot;&quot; </span><span class="s0">in </span><span class="s1">state.static:</span>
+                    <span class="s0">for </span><span class="s1">rule </span><span class="s0">in </span><span class="s1">state.static[</span><span class="s5">&quot;&quot;</span><span class="s1">].rules:</span>
+                        <span class="s0">if </span><span class="s1">websocket == rule.websocket </span><span class="s0">and </span><span class="s1">(</span>
+                            <span class="s1">rule.methods </span><span class="s0">is None or </span><span class="s1">method </span><span class="s0">in </span><span class="s1">rule.methods</span>
+                        <span class="s1">):</span>
+                            <span class="s0">if </span><span class="s1">rule.strict_slashes:</span>
+                                <span class="s0">raise </span><span class="s1">SlashRequired()</span>
+                            <span class="s0">else</span><span class="s1">:</span>
+                                <span class="s0">return </span><span class="s1">rule</span><span class="s0">, </span><span class="s1">values</span>
+                <span class="s0">return None</span>
+
+            <span class="s1">part = parts[</span><span class="s4">0</span><span class="s1">]</span>
+            <span class="s3"># To match this part try the static transitions first</span>
+            <span class="s0">if </span><span class="s1">part </span><span class="s0">in </span><span class="s1">state.static:</span>
+                <span class="s1">rv = _match(state.static[part]</span><span class="s0">, </span><span class="s1">parts[</span><span class="s4">1</span><span class="s1">:]</span><span class="s0">, </span><span class="s1">values)</span>
+                <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+                    <span class="s0">return </span><span class="s1">rv</span>
+            <span class="s3"># No match via the static transitions, so try the dynamic</span>
+            <span class="s3"># ones.</span>
+            <span class="s0">for </span><span class="s1">test_part</span><span class="s0">, </span><span class="s1">new_state </span><span class="s0">in </span><span class="s1">state.dynamic:</span>
+                <span class="s1">target = part</span>
+                <span class="s1">remaining = parts[</span><span class="s4">1</span><span class="s1">:]</span>
+                <span class="s3"># A final part indicates a transition that always</span>
+                <span class="s3"># consumes the remaining parts i.e. transitions to a</span>
+                <span class="s3"># final state.</span>
+                <span class="s0">if </span><span class="s1">test_part.final:</span>
+                    <span class="s1">target = </span><span class="s5">&quot;/&quot;</span><span class="s1">.join(parts)</span>
+                    <span class="s1">remaining = []</span>
+                <span class="s1">match = re.compile(test_part.content).match(target)</span>
+                <span class="s0">if </span><span class="s1">match </span><span class="s0">is not None</span><span class="s1">:</span>
+                    <span class="s0">if </span><span class="s1">test_part.suffixed:</span>
+                        <span class="s3"># If a part_isolating=False part has a slash suffix, remove the</span>
+                        <span class="s3"># suffix from the match and check for the slash redirect next.</span>
+                        <span class="s1">suffix = match.groups()[-</span><span class="s4">1</span><span class="s1">]</span>
+                        <span class="s0">if </span><span class="s1">suffix == </span><span class="s5">&quot;/&quot;</span><span class="s1">:</span>
+                            <span class="s1">remaining = [</span><span class="s5">&quot;&quot;</span><span class="s1">]</span>
+
+                    <span class="s1">converter_groups = sorted(</span>
+                        <span class="s1">match.groupdict().items()</span><span class="s0">, </span><span class="s1">key=</span><span class="s0">lambda </span><span class="s1">entry: entry[</span><span class="s4">0</span><span class="s1">]</span>
+                    <span class="s1">)</span>
+                    <span class="s1">groups = [</span>
+                        <span class="s1">value</span>
+                        <span class="s0">for </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">converter_groups</span>
+                        <span class="s0">if </span><span class="s1">key[:</span><span class="s4">11</span><span class="s1">] == </span><span class="s5">&quot;__werkzeug_&quot;</span>
+                    <span class="s1">]</span>
+                    <span class="s1">rv = _match(new_state</span><span class="s0">, </span><span class="s1">remaining</span><span class="s0">, </span><span class="s1">values + groups)</span>
+                    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+                        <span class="s0">return </span><span class="s1">rv</span>
+
+            <span class="s3"># If there is no match and the only part left is a</span>
+            <span class="s3"># trailing slash (&quot;&quot;) consider rules that aren't</span>
+            <span class="s3"># strict-slashes as these should match if there is a final</span>
+            <span class="s3"># slash part.</span>
+            <span class="s0">if </span><span class="s1">parts == [</span><span class="s5">&quot;&quot;</span><span class="s1">]:</span>
+                <span class="s0">for </span><span class="s1">rule </span><span class="s0">in </span><span class="s1">state.rules:</span>
+                    <span class="s0">if </span><span class="s1">rule.strict_slashes:</span>
+                        <span class="s0">continue</span>
+                    <span class="s0">if </span><span class="s1">rule.methods </span><span class="s0">is not None and </span><span class="s1">method </span><span class="s0">not in </span><span class="s1">rule.methods:</span>
+                        <span class="s1">have_match_for.update(rule.methods)</span>
+                    <span class="s0">elif </span><span class="s1">rule.websocket != websocket:</span>
+                        <span class="s1">websocket_mismatch = </span><span class="s0">True</span>
+                    <span class="s0">else</span><span class="s1">:</span>
+                        <span class="s0">return </span><span class="s1">rule</span><span class="s0">, </span><span class="s1">values</span>
+
+            <span class="s0">return None</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">rv = _match(self._root</span><span class="s0">, </span><span class="s1">[domain</span><span class="s0">, </span><span class="s1">*path.split(</span><span class="s5">&quot;/&quot;</span><span class="s1">)]</span><span class="s0">, </span><span class="s1">[])</span>
+        <span class="s0">except </span><span class="s1">SlashRequired:</span>
+            <span class="s0">raise </span><span class="s1">RequestPath(</span><span class="s5">f&quot;</span><span class="s0">{</span><span class="s1">path</span><span class="s0">}</span><span class="s5">/&quot;</span><span class="s1">) </span><span class="s0">from None</span>
+
+        <span class="s0">if </span><span class="s1">self.merge_slashes </span><span class="s0">and </span><span class="s1">rv </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s3"># Try to match again, but with slashes merged</span>
+            <span class="s1">path = re.sub(</span><span class="s5">&quot;/{2,}?&quot;</span><span class="s0">, </span><span class="s5">&quot;/&quot;</span><span class="s0">, </span><span class="s1">path)</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">rv = _match(self._root</span><span class="s0">, </span><span class="s1">[domain</span><span class="s0">, </span><span class="s1">*path.split(</span><span class="s5">&quot;/&quot;</span><span class="s1">)]</span><span class="s0">, </span><span class="s1">[])</span>
+            <span class="s0">except </span><span class="s1">SlashRequired:</span>
+                <span class="s0">raise </span><span class="s1">RequestPath(</span><span class="s5">f&quot;</span><span class="s0">{</span><span class="s1">path</span><span class="s0">}</span><span class="s5">/&quot;</span><span class="s1">) </span><span class="s0">from None</span>
+            <span class="s0">if </span><span class="s1">rv </span><span class="s0">is None or </span><span class="s1">rv[</span><span class="s4">0</span><span class="s1">].merge_slashes </span><span class="s0">is False</span><span class="s1">:</span>
+                <span class="s0">raise </span><span class="s1">NoMatch(have_match_for</span><span class="s0">, </span><span class="s1">websocket_mismatch)</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s0">raise </span><span class="s1">RequestPath(</span><span class="s5">f&quot;</span><span class="s0">{</span><span class="s1">path</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s1">)</span>
+        <span class="s0">elif </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">rule</span><span class="s0">, </span><span class="s1">values = rv</span>
+
+            <span class="s1">result = {}</span>
+            <span class="s0">for </span><span class="s1">name</span><span class="s0">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">zip(rule._converters.keys()</span><span class="s0">, </span><span class="s1">values):</span>
+                <span class="s0">try</span><span class="s1">:</span>
+                    <span class="s1">value = rule._converters[name].to_python(value)</span>
+                <span class="s0">except </span><span class="s1">ValidationError:</span>
+                    <span class="s0">raise </span><span class="s1">NoMatch(have_match_for</span><span class="s0">, </span><span class="s1">websocket_mismatch) </span><span class="s0">from None</span>
+                <span class="s1">result[str(name)] = value</span>
+            <span class="s0">if </span><span class="s1">rule.defaults:</span>
+                <span class="s1">result.update(rule.defaults)</span>
+
+            <span class="s0">if </span><span class="s1">rule.alias </span><span class="s0">and </span><span class="s1">rule.map.redirect_defaults:</span>
+                <span class="s0">raise </span><span class="s1">RequestAliasRedirect(result</span><span class="s0">, </span><span class="s1">rule.endpoint)</span>
+
+            <span class="s0">return </span><span class="s1">rule</span><span class="s0">, </span><span class="s1">result</span>
+
+        <span class="s0">raise </span><span class="s1">NoMatch(have_match_for</span><span class="s0">, </span><span class="s1">websocket_mismatch)</span>
+</pre>
+</body>
+</html>

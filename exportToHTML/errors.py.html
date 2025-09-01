@@ -1,0 +1,141 @@
+<html>
+<head>
+<title>errors.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+errors.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s0"># We don't need to call super() in __init__ methods of our</span>
+<span class="s0"># BaseException and Exception classes because we also define</span>
+<span class="s0"># our own __str__ methods so there is no need to pass 'message'</span>
+<span class="s0"># to the base class to get a meaningful output from 'str(exc)'.</span>
+<span class="s0"># pylint: disable=super-init-not-called</span>
+
+
+<span class="s2">class </span><span class="s1">ParseException(Exception):</span>
+    <span class="s2">pass</span>
+
+
+<span class="s2">class </span><span class="s1">NoMoreData(IOError):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">buf=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">self.buf = buf</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;No more data after: %r&quot; </span><span class="s1">% self.buf</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidRequestLine(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">req):</span>
+        <span class="s1">self.req = req</span>
+        <span class="s1">self.code = </span><span class="s4">400</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid HTTP request line: %r&quot; </span><span class="s1">% self.req</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidRequestMethod(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">method):</span>
+        <span class="s1">self.method = method</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid HTTP method: %r&quot; </span><span class="s1">% self.method</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidHTTPVersion(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">version):</span>
+        <span class="s1">self.version = version</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid HTTP Version: %r&quot; </span><span class="s1">% self.version</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidHeader(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">hdr</span><span class="s2">, </span><span class="s1">req=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">self.hdr = hdr</span>
+        <span class="s1">self.req = req</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid HTTP Header: %r&quot; </span><span class="s1">% self.hdr</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidHeaderName(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">hdr):</span>
+        <span class="s1">self.hdr = hdr</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid HTTP header name: %r&quot; </span><span class="s1">% self.hdr</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidChunkSize(IOError):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">data):</span>
+        <span class="s1">self.data = data</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid chunk size: %r&quot; </span><span class="s1">% self.data</span>
+
+
+<span class="s2">class </span><span class="s1">ChunkMissingTerminator(IOError):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">term):</span>
+        <span class="s1">self.term = term</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid chunk terminator is not '</span><span class="s2">\\</span><span class="s3">r</span><span class="s2">\\</span><span class="s3">n': %r&quot; </span><span class="s1">% self.term</span>
+
+
+<span class="s2">class </span><span class="s1">LimitRequestLine(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">size</span><span class="s2">, </span><span class="s1">max_size):</span>
+        <span class="s1">self.size = size</span>
+        <span class="s1">self.max_size = max_size</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Request Line is too large (%s &gt; %s)&quot; </span><span class="s1">% (self.size</span><span class="s2">, </span><span class="s1">self.max_size)</span>
+
+
+<span class="s2">class </span><span class="s1">LimitRequestHeaders(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">msg):</span>
+        <span class="s1">self.msg = msg</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s1">self.msg</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidProxyLine(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">line):</span>
+        <span class="s1">self.line = line</span>
+        <span class="s1">self.code = </span><span class="s4">400</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Invalid PROXY line: %r&quot; </span><span class="s1">% self.line</span>
+
+
+<span class="s2">class </span><span class="s1">ForbiddenProxyRequest(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">host):</span>
+        <span class="s1">self.host = host</span>
+        <span class="s1">self.code = </span><span class="s4">403</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Proxy request from %r not allowed&quot; </span><span class="s1">% self.host</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidSchemeHeaders(ParseException):</span>
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;Contradictory scheme headers&quot;</span>
+</pre>
+</body>
+</html>

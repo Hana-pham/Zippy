@@ -1,0 +1,263 @@
+<html>
+<head>
+<title>mixins.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+mixins.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">itertools </span><span class="s0">import </span><span class="s1">repeat</span>
+
+<span class="s0">from </span><span class="s1">.._internal </span><span class="s0">import </span><span class="s1">_missing</span>
+
+
+<span class="s0">def </span><span class="s1">is_immutable(self):</span>
+    <span class="s0">raise </span><span class="s1">TypeError(</span><span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">!r} </span><span class="s2">objects are immutable&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">ImmutableListMixin:</span>
+    <span class="s3">&quot;&quot;&quot;Makes a :class:`list` immutable. 
+ 
+    .. versionadded:: 0.5 
+ 
+    :private: 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_hash_cache = </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">__hash__(self):</span>
+        <span class="s0">if </span><span class="s1">self._hash_cache </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">self._hash_cache</span>
+        <span class="s1">rv = self._hash_cache = hash(tuple(self))</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">__reduce_ex__(self</span><span class="s0">, </span><span class="s1">protocol):</span>
+        <span class="s0">return </span><span class="s1">type(self)</span><span class="s0">, </span><span class="s1">(list(self)</span><span class="s0">,</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">__iadd__(self</span><span class="s0">, </span><span class="s1">other):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">__imul__(self</span><span class="s0">, </span><span class="s1">other):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">append(self</span><span class="s0">, </span><span class="s1">item):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">remove(self</span><span class="s0">, </span><span class="s1">item):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">extend(self</span><span class="s0">, </span><span class="s1">iterable):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">insert(self</span><span class="s0">, </span><span class="s1">pos</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">index=-</span><span class="s4">1</span><span class="s1">):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">reverse(self):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">sort(self</span><span class="s0">, </span><span class="s1">key=</span><span class="s0">None, </span><span class="s1">reverse=</span><span class="s0">False</span><span class="s1">):</span>
+        <span class="s1">is_immutable(self)</span>
+
+
+<span class="s0">class </span><span class="s1">ImmutableDictMixin:</span>
+    <span class="s3">&quot;&quot;&quot;Makes a :class:`dict` immutable. 
+ 
+    .. versionadded:: 0.5 
+ 
+    :private: 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_hash_cache = </span><span class="s0">None</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">fromkeys(cls</span><span class="s0">, </span><span class="s1">keys</span><span class="s0">, </span><span class="s1">value=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">instance = super().__new__(cls)</span>
+        <span class="s1">instance.__init__(zip(keys</span><span class="s0">, </span><span class="s1">repeat(value)))</span>
+        <span class="s0">return </span><span class="s1">instance</span>
+
+    <span class="s0">def </span><span class="s1">__reduce_ex__(self</span><span class="s0">, </span><span class="s1">protocol):</span>
+        <span class="s0">return </span><span class="s1">type(self)</span><span class="s0">, </span><span class="s1">(dict(self)</span><span class="s0">,</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">_iter_hashitems(self):</span>
+        <span class="s0">return </span><span class="s1">self.items()</span>
+
+    <span class="s0">def </span><span class="s1">__hash__(self):</span>
+        <span class="s0">if </span><span class="s1">self._hash_cache </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">self._hash_cache</span>
+        <span class="s1">rv = self._hash_cache = hash(frozenset(self._iter_hashitems()))</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">*args</span><span class="s0">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">popitem(self):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">clear(self):</span>
+        <span class="s1">is_immutable(self)</span>
+
+
+<span class="s0">class </span><span class="s1">ImmutableMultiDictMixin(ImmutableDictMixin):</span>
+    <span class="s3">&quot;&quot;&quot;Makes a :class:`MultiDict` immutable. 
+ 
+    .. versionadded:: 0.5 
+ 
+    :private: 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__reduce_ex__(self</span><span class="s0">, </span><span class="s1">protocol):</span>
+        <span class="s0">return </span><span class="s1">type(self)</span><span class="s0">, </span><span class="s1">(list(self.items(multi=</span><span class="s0">True</span><span class="s1">))</span><span class="s0">,</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">_iter_hashitems(self):</span>
+        <span class="s0">return </span><span class="s1">self.items(multi=</span><span class="s0">True</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">popitemlist(self):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">poplist(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">setlist(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">new_list):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">setlistdefault(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default_list=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">is_immutable(self)</span>
+
+
+<span class="s0">class </span><span class="s1">ImmutableHeadersMixin:</span>
+    <span class="s3">&quot;&quot;&quot;Makes a :class:`Headers` immutable.  We do not mark them as 
+    hashable though since the only usecase for this datastructure 
+    in Werkzeug is a view on a mutable structure. 
+ 
+    .. versionadded:: 0.5 
+ 
+    :private: 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">set(self</span><span class="s0">, </span><span class="s1">_key</span><span class="s0">, </span><span class="s1">_value</span><span class="s0">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">setlist(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">values):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">_key</span><span class="s0">, </span><span class="s1">_value</span><span class="s0">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">add_header(self</span><span class="s0">, </span><span class="s1">_key</span><span class="s0">, </span><span class="s1">_value</span><span class="s0">, </span><span class="s1">**_kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">remove(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">extend(self</span><span class="s0">, </span><span class="s1">*args</span><span class="s0">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">*args</span><span class="s0">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">insert(self</span><span class="s0">, </span><span class="s1">pos</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key=</span><span class="s0">None, </span><span class="s1">default=_missing):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">popitem(self):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default):</span>
+        <span class="s1">is_immutable(self)</span>
+
+    <span class="s0">def </span><span class="s1">setlistdefault(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default):</span>
+        <span class="s1">is_immutable(self)</span>
+
+
+<span class="s0">def </span><span class="s1">_calls_update(name):</span>
+    <span class="s0">def </span><span class="s1">oncall(self</span><span class="s0">, </span><span class="s1">*args</span><span class="s0">, </span><span class="s1">**kw):</span>
+        <span class="s1">rv = getattr(super(UpdateDictMixin</span><span class="s0">, </span><span class="s1">self)</span><span class="s0">, </span><span class="s1">name)(*args</span><span class="s0">, </span><span class="s1">**kw)</span>
+
+        <span class="s0">if </span><span class="s1">self.on_update </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.on_update(self)</span>
+
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s1">oncall.__name__ = name</span>
+    <span class="s0">return </span><span class="s1">oncall</span>
+
+
+<span class="s0">class </span><span class="s1">UpdateDictMixin(dict):</span>
+    <span class="s3">&quot;&quot;&quot;Makes dicts call `self.on_update` on modifications. 
+ 
+    .. versionadded:: 0.5 
+ 
+    :private: 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">on_update = </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">modified = key </span><span class="s0">not in </span><span class="s1">self</span>
+        <span class="s1">rv = super().setdefault(key</span><span class="s0">, </span><span class="s1">default)</span>
+        <span class="s0">if </span><span class="s1">modified </span><span class="s0">and </span><span class="s1">self.on_update </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.on_update(self)</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">default=_missing):</span>
+        <span class="s1">modified = key </span><span class="s0">in </span><span class="s1">self</span>
+        <span class="s0">if </span><span class="s1">default </span><span class="s0">is </span><span class="s1">_missing:</span>
+            <span class="s1">rv = super().pop(key)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">rv = super().pop(key</span><span class="s0">, </span><span class="s1">default)</span>
+        <span class="s0">if </span><span class="s1">modified </span><span class="s0">and </span><span class="s1">self.on_update </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.on_update(self)</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s1">__setitem__ = _calls_update(</span><span class="s2">&quot;__setitem__&quot;</span><span class="s1">)</span>
+    <span class="s1">__delitem__ = _calls_update(</span><span class="s2">&quot;__delitem__&quot;</span><span class="s1">)</span>
+    <span class="s1">clear = _calls_update(</span><span class="s2">&quot;clear&quot;</span><span class="s1">)</span>
+    <span class="s1">popitem = _calls_update(</span><span class="s2">&quot;popitem&quot;</span><span class="s1">)</span>
+    <span class="s1">update = _calls_update(</span><span class="s2">&quot;update&quot;</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

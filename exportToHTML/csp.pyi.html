@@ -1,0 +1,187 @@
+<html>
+<head>
+<title>csp.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+csp.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Callable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Mapping</span>
+
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">UpdateDictMixin</span>
+
+<span class="s0">def </span><span class="s1">csp_property(key: str) -&gt; property: ...</span>
+
+<span class="s0">class </span><span class="s1">ContentSecurityPolicy(UpdateDictMixin[str</span><span class="s0">, </span><span class="s1">str]</span><span class="s0">, </span><span class="s1">dict[str</span><span class="s0">, </span><span class="s1">str]):</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">base_uri(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@base_uri.setter</span>
+    <span class="s0">def </span><span class="s1">base_uri(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@base_uri.deleter</span>
+    <span class="s0">def </span><span class="s1">base_uri(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">child_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@child_src.setter</span>
+    <span class="s0">def </span><span class="s1">child_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@child_src.deleter</span>
+    <span class="s0">def </span><span class="s1">child_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">connect_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@connect_src.setter</span>
+    <span class="s0">def </span><span class="s1">connect_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@connect_src.deleter</span>
+    <span class="s0">def </span><span class="s1">connect_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">default_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@default_src.setter</span>
+    <span class="s0">def </span><span class="s1">default_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@default_src.deleter</span>
+    <span class="s0">def </span><span class="s1">default_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">font_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@font_src.setter</span>
+    <span class="s0">def </span><span class="s1">font_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@font_src.deleter</span>
+    <span class="s0">def </span><span class="s1">font_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">form_action(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@form_action.setter</span>
+    <span class="s0">def </span><span class="s1">form_action(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@form_action.deleter</span>
+    <span class="s0">def </span><span class="s1">form_action(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">frame_ancestors(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@frame_ancestors.setter</span>
+    <span class="s0">def </span><span class="s1">frame_ancestors(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@frame_ancestors.deleter</span>
+    <span class="s0">def </span><span class="s1">frame_ancestors(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">frame_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@frame_src.setter</span>
+    <span class="s0">def </span><span class="s1">frame_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@frame_src.deleter</span>
+    <span class="s0">def </span><span class="s1">frame_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">img_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@img_src.setter</span>
+    <span class="s0">def </span><span class="s1">img_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@img_src.deleter</span>
+    <span class="s0">def </span><span class="s1">img_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">manifest_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@manifest_src.setter</span>
+    <span class="s0">def </span><span class="s1">manifest_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@manifest_src.deleter</span>
+    <span class="s0">def </span><span class="s1">manifest_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">media_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@media_src.setter</span>
+    <span class="s0">def </span><span class="s1">media_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@media_src.deleter</span>
+    <span class="s0">def </span><span class="s1">media_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">navigate_to(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@navigate_to.setter</span>
+    <span class="s0">def </span><span class="s1">navigate_to(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@navigate_to.deleter</span>
+    <span class="s0">def </span><span class="s1">navigate_to(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">object_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@object_src.setter</span>
+    <span class="s0">def </span><span class="s1">object_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@object_src.deleter</span>
+    <span class="s0">def </span><span class="s1">object_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">prefetch_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@prefetch_src.setter</span>
+    <span class="s0">def </span><span class="s1">prefetch_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@prefetch_src.deleter</span>
+    <span class="s0">def </span><span class="s1">prefetch_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">plugin_types(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@plugin_types.setter</span>
+    <span class="s0">def </span><span class="s1">plugin_types(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@plugin_types.deleter</span>
+    <span class="s0">def </span><span class="s1">plugin_types(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">report_to(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@report_to.setter</span>
+    <span class="s0">def </span><span class="s1">report_to(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@report_to.deleter</span>
+    <span class="s0">def </span><span class="s1">report_to(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">report_uri(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@report_uri.setter</span>
+    <span class="s0">def </span><span class="s1">report_uri(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@report_uri.deleter</span>
+    <span class="s0">def </span><span class="s1">report_uri(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">sandbox(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@sandbox.setter</span>
+    <span class="s0">def </span><span class="s1">sandbox(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@sandbox.deleter</span>
+    <span class="s0">def </span><span class="s1">sandbox(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">script_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@script_src.setter</span>
+    <span class="s0">def </span><span class="s1">script_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@script_src.deleter</span>
+    <span class="s0">def </span><span class="s1">script_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">script_src_attr(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@script_src_attr.setter</span>
+    <span class="s0">def </span><span class="s1">script_src_attr(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@script_src_attr.deleter</span>
+    <span class="s0">def </span><span class="s1">script_src_attr(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">script_src_elem(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@script_src_elem.setter</span>
+    <span class="s0">def </span><span class="s1">script_src_elem(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@script_src_elem.deleter</span>
+    <span class="s0">def </span><span class="s1">script_src_elem(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">style_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@style_src.setter</span>
+    <span class="s0">def </span><span class="s1">style_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@style_src.deleter</span>
+    <span class="s0">def </span><span class="s1">style_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">style_src_attr(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@style_src_attr.setter</span>
+    <span class="s0">def </span><span class="s1">style_src_attr(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@style_src_attr.deleter</span>
+    <span class="s0">def </span><span class="s1">style_src_attr(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">style_src_elem(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@style_src_elem.setter</span>
+    <span class="s0">def </span><span class="s1">style_src_elem(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@style_src_elem.deleter</span>
+    <span class="s0">def </span><span class="s1">style_src_elem(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">worker_src(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@worker_src.setter</span>
+    <span class="s0">def </span><span class="s1">worker_src(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@worker_src.deleter</span>
+    <span class="s0">def </span><span class="s1">worker_src(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">provided: bool</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">values: Mapping[str</span><span class="s0">, </span><span class="s1">str] | Iterable[tuple[str</span><span class="s0">, </span><span class="s1">str]] = ()</span><span class="s0">,</span>
+        <span class="s1">on_update: Callable[[ContentSecurityPolicy]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_get_value(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_set_value(self</span><span class="s0">, </span><span class="s1">key: str</span><span class="s0">, </span><span class="s1">value: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_del_value(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+</pre>
+</body>
+</html>

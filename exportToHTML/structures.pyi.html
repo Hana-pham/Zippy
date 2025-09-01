@@ -1,0 +1,228 @@
+<html>
+<head>
+<title>structures.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+structures.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Callable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterator</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Mapping</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Any</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Generic</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Literal</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">NoReturn</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">overload</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TypeVar</span>
+
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">ImmutableDictMixin</span><span class="s0">,</span>
+    <span class="s1">ImmutableListMixin</span><span class="s0">,</span>
+    <span class="s1">ImmutableMultiDictMixin</span><span class="s0">,</span>
+    <span class="s1">UpdateDictMixin</span><span class="s0">,</span>
+<span class="s1">)</span>
+
+<span class="s1">D = TypeVar(</span><span class="s2">&quot;D&quot;</span><span class="s1">)</span>
+<span class="s1">K = TypeVar(</span><span class="s2">&quot;K&quot;</span><span class="s1">)</span>
+<span class="s1">T = TypeVar(</span><span class="s2">&quot;T&quot;</span><span class="s1">)</span>
+<span class="s1">V = TypeVar(</span><span class="s2">&quot;V&quot;</span><span class="s1">)</span>
+<span class="s1">_CD = TypeVar(</span><span class="s2">&quot;_CD&quot;</span><span class="s0">, </span><span class="s1">bound=</span><span class="s2">&quot;CallbackDict&quot;</span><span class="s1">)</span>
+
+<span class="s0">def </span><span class="s1">is_immutable(self: object) -&gt; NoReturn: ...</span>
+<span class="s0">def </span><span class="s1">iter_multi_items(</span>
+    <span class="s1">mapping: Mapping[K</span><span class="s0">, </span><span class="s1">V | Iterable[V]] | Iterable[tuple[K</span><span class="s0">, </span><span class="s1">V]]</span>
+<span class="s1">) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">V]]: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableList(ImmutableListMixin[V]): ...</span>
+
+<span class="s0">class </span><span class="s1">TypeConversionDict(dict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: </span><span class="s0">None </span><span class="s1">= ...</span><span class="s0">, </span><span class="s1">type: </span><span class="s0">None </span><span class="s1">= ...) -&gt; V | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: D</span><span class="s0">, </span><span class="s1">type: </span><span class="s0">None </span><span class="s1">= ...) -&gt; D | V: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: D</span><span class="s0">, </span><span class="s1">type: Callable[[V]</span><span class="s0">, </span><span class="s1">T]) -&gt; D | T: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">type: Callable[[V]</span><span class="s0">, </span><span class="s1">T]) -&gt; T | </span><span class="s0">None</span><span class="s1">: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableTypeConversionDict(ImmutableDictMixin[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">TypeConversionDict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s0">def </span><span class="s1">copy(self) -&gt; TypeConversionDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">__copy__(self) -&gt; ImmutableTypeConversionDict: ...</span>
+
+<span class="s0">class </span><span class="s1">MultiDict(TypeConversionDict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">mapping: Mapping[K</span><span class="s0">, </span><span class="s1">Iterable[V] | V] | Iterable[tuple[K</span><span class="s0">, </span><span class="s1">V]] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">item: K) -&gt; V: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">getlist(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; list[V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">getlist(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">type: Callable[[V]</span><span class="s0">, </span><span class="s1">T] = ...) -&gt; list[T]: ...</span>
+    <span class="s0">def </span><span class="s1">setlist(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">new_list: Iterable[V]) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span><span class="s1">) -&gt; V: ...</span>
+    <span class="s0">def </span><span class="s1">setlistdefault(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default_list: Iterable[V] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; list[V]: ...</span>
+    <span class="s0">def </span><span class="s1">items(self</span><span class="s0">, </span><span class="s1">multi: bool = </span><span class="s0">False</span><span class="s1">) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">V]]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">lists(self) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">list[V]]]: ...</span>
+    <span class="s0">def </span><span class="s1">values(self) -&gt; Iterator[V]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">listvalues(self) -&gt; Iterator[list[V]]: ...</span>
+    <span class="s0">def </span><span class="s1">copy(self) -&gt; MultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">deepcopy(self</span><span class="s0">, </span><span class="s1">memo: Any = </span><span class="s0">None</span><span class="s1">) -&gt; MultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">to_dict(self) -&gt; dict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">to_dict(self</span><span class="s0">, </span><span class="s1">flat: Literal[</span><span class="s0">False</span><span class="s1">]) -&gt; dict[K</span><span class="s0">, </span><span class="s1">list[V]]: ...</span>
+    <span class="s0">def </span><span class="s1">update(  </span><span class="s3"># type: ignore</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">mapping: Mapping[K</span><span class="s0">, </span><span class="s1">Iterable[V] | V] | Iterable[tuple[K</span><span class="s0">, </span><span class="s1">V]]</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; V: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | T = ...) -&gt; V | T: ...</span>
+    <span class="s0">def </span><span class="s1">popitem(self) -&gt; tuple[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">poplist(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; list[V]: ...</span>
+    <span class="s0">def </span><span class="s1">popitemlist(self) -&gt; tuple[K</span><span class="s0">, </span><span class="s1">list[V]]: ...</span>
+    <span class="s0">def </span><span class="s1">__copy__(self) -&gt; MultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">__deepcopy__(self</span><span class="s0">, </span><span class="s1">memo: Any) -&gt; MultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+
+<span class="s0">class </span><span class="s1">_omd_bucket(Generic[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s1">prev: _omd_bucket | </span><span class="s0">None</span>
+    <span class="s1">next: _omd_bucket | </span><span class="s0">None</span>
+    <span class="s1">key: K</span>
+    <span class="s1">value: V</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">omd: OrderedMultiDict</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">unlink(self</span><span class="s0">, </span><span class="s1">omd: OrderedMultiDict) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+
+<span class="s0">class </span><span class="s1">OrderedMultiDict(MultiDict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s1">_first_bucket: _omd_bucket | </span><span class="s0">None</span>
+    <span class="s1">_last_bucket: _omd_bucket | </span><span class="s0">None</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">mapping: Mapping[K</span><span class="s0">, </span><span class="s1">V] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__eq__(self</span><span class="s0">, </span><span class="s1">other: object) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; V: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">keys(self) -&gt; Iterator[K]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; Iterator[K]: ...</span>
+    <span class="s0">def </span><span class="s1">values(self) -&gt; Iterator[V]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">items(self</span><span class="s0">, </span><span class="s1">multi: bool = </span><span class="s0">False</span><span class="s1">) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">V]]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">lists(self) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">list[V]]]: ...</span>
+    <span class="s0">def </span><span class="s1">listvalues(self) -&gt; Iterator[list[V]]: ...</span>
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">getlist(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; list[V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">getlist(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">type: Callable[[V]</span><span class="s0">, </span><span class="s1">T] = ...) -&gt; list[T]: ...</span>
+    <span class="s0">def </span><span class="s1">setlist(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">new_list: Iterable[V]) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">setlistdefault(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default_list: Iterable[V] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; list[V]: ...</span>
+    <span class="s0">def </span><span class="s1">update(  </span><span class="s3"># type: ignore</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">mapping: Mapping[K</span><span class="s0">, </span><span class="s1">V] | Iterable[tuple[K</span><span class="s0">, </span><span class="s1">V]]</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">poplist(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; list[V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; V: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | T = ...) -&gt; V | T: ...</span>
+    <span class="s0">def </span><span class="s1">popitem(self) -&gt; tuple[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">popitemlist(self) -&gt; tuple[K</span><span class="s0">, </span><span class="s1">list[V]]: ...</span>
+
+<span class="s0">class </span><span class="s1">CombinedMultiDict(ImmutableMultiDictMixin[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">MultiDict[K</span><span class="s0">, </span><span class="s1">V]):  </span><span class="s3"># type: ignore</span>
+    <span class="s1">dicts: list[MultiDict[K</span><span class="s0">, </span><span class="s1">V]]</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">dicts: Iterable[MultiDict[K</span><span class="s0">, </span><span class="s1">V]] | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">fromkeys(cls</span><span class="s0">, </span><span class="s1">keys: Any</span><span class="s0">, </span><span class="s1">value: Any = </span><span class="s0">None</span><span class="s1">) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; V: ...</span>
+    <span class="s1">@overload  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; V | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | T = ...) -&gt; V | T: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">get(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: T | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None, </span><span class="s1">type: Callable[[V]</span><span class="s0">, </span><span class="s1">T] = ...</span>
+    <span class="s1">) -&gt; T | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">getlist(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; list[V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">getlist(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">type: Callable[[V]</span><span class="s0">, </span><span class="s1">T] = ...) -&gt; list[T]: ...</span>
+    <span class="s0">def </span><span class="s1">_keys_impl(self) -&gt; set[K]: ...</span>
+    <span class="s0">def </span><span class="s1">keys(self) -&gt; set[K]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; set[K]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">items(self</span><span class="s0">, </span><span class="s1">multi: bool = </span><span class="s0">False</span><span class="s1">) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">V]]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">values(self) -&gt; Iterator[V]: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">lists(self) -&gt; Iterator[tuple[K</span><span class="s0">, </span><span class="s1">list[V]]]: ...</span>
+    <span class="s0">def </span><span class="s1">listvalues(self) -&gt; Iterator[list[V]]: ...</span>
+    <span class="s0">def </span><span class="s1">copy(self) -&gt; MultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">to_dict(self) -&gt; dict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">to_dict(self</span><span class="s0">, </span><span class="s1">flat: Literal[</span><span class="s0">False</span><span class="s1">]) -&gt; dict[K</span><span class="s0">, </span><span class="s1">list[V]]: ...</span>
+    <span class="s0">def </span><span class="s1">__contains__(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; bool: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">has_key(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; bool: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableDict(ImmutableDictMixin[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">dict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s0">def </span><span class="s1">copy(self) -&gt; dict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">__copy__(self) -&gt; ImmutableDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableMultiDict(  </span><span class="s3"># type: ignore</span>
+    <span class="s1">ImmutableMultiDictMixin[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">MultiDict[K</span><span class="s0">, </span><span class="s1">V]</span>
+<span class="s1">):</span>
+    <span class="s0">def </span><span class="s1">copy(self) -&gt; MultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">__copy__(self) -&gt; ImmutableMultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableOrderedMultiDict(  </span><span class="s3"># type: ignore</span>
+    <span class="s1">ImmutableMultiDictMixin[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">OrderedMultiDict[K</span><span class="s0">, </span><span class="s1">V]</span>
+<span class="s1">):</span>
+    <span class="s0">def </span><span class="s1">_iter_hashitems(self) -&gt; Iterator[tuple[int</span><span class="s0">, </span><span class="s1">tuple[K</span><span class="s0">, </span><span class="s1">V]]]: ...</span>
+    <span class="s0">def </span><span class="s1">copy(self) -&gt; OrderedMultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">__copy__(self) -&gt; ImmutableOrderedMultiDict[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+
+<span class="s0">class </span><span class="s1">CallbackDict(UpdateDictMixin[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">dict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">initial: Mapping[K</span><span class="s0">, </span><span class="s1">V] | Iterable[tuple[K</span><span class="s0">, </span><span class="s1">V]] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">on_update: Callable[[_CD]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+
+<span class="s0">class </span><span class="s1">HeaderSet(set[str]):</span>
+    <span class="s1">_headers: list[str]</span>
+    <span class="s1">_set: set[str]</span>
+    <span class="s1">on_update: Callable[[HeaderSet]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">headers: Iterable[str] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">on_update: Callable[[HeaderSet]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">header: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">remove(self</span><span class="s0">, </span><span class="s1">header: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">iterable: Iterable[str]) -&gt; </span><span class="s0">None</span><span class="s1">: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">discard(self</span><span class="s0">, </span><span class="s1">header: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">find(self</span><span class="s0">, </span><span class="s1">header: str) -&gt; int: ...</span>
+    <span class="s0">def </span><span class="s1">index(self</span><span class="s0">, </span><span class="s1">header: str) -&gt; int: ...</span>
+    <span class="s0">def </span><span class="s1">clear(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">as_set(self</span><span class="s0">, </span><span class="s1">preserve_casing: bool = </span><span class="s0">False</span><span class="s1">) -&gt; set[str]: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">idx: int) -&gt; str: ...</span>
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">idx: int) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">idx: int</span><span class="s0">, </span><span class="s1">value: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__contains__(self</span><span class="s0">, </span><span class="s1">header: str) -&gt; bool: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">__len__(self) -&gt; int: ...</span>
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; Iterator[str]: ...</span>
+</pre>
+</body>
+</html>

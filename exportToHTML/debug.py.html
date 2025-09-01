@@ -1,0 +1,91 @@
+<html>
+<head>
+<title>debug.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #cc7832;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+debug.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">&quot;&quot;&quot;The debug module contains utilities and functions for better 
+debugging Gunicorn.&quot;&quot;&quot;</span>
+
+<span class="s3">import </span><span class="s1">sys</span>
+<span class="s3">import </span><span class="s1">linecache</span>
+<span class="s3">import </span><span class="s1">re</span>
+<span class="s3">import </span><span class="s1">inspect</span>
+
+<span class="s1">__all__ = [</span><span class="s4">'spew'</span><span class="s3">, </span><span class="s4">'unspew'</span><span class="s1">]</span>
+
+<span class="s1">_token_spliter = re.compile(</span><span class="s4">r'\W+'</span><span class="s1">)</span>
+
+
+<span class="s3">class </span><span class="s1">Spew(object):</span>
+
+    <span class="s3">def </span><span class="s1">__init__(self</span><span class="s3">, </span><span class="s1">trace_names=</span><span class="s3">None, </span><span class="s1">show_values=</span><span class="s3">True</span><span class="s1">):</span>
+        <span class="s1">self.trace_names = trace_names</span>
+        <span class="s1">self.show_values = show_values</span>
+
+    <span class="s3">def </span><span class="s1">__call__(self</span><span class="s3">, </span><span class="s1">frame</span><span class="s3">, </span><span class="s1">event</span><span class="s3">, </span><span class="s1">arg):</span>
+        <span class="s3">if </span><span class="s1">event == </span><span class="s4">'line'</span><span class="s1">:</span>
+            <span class="s1">lineno = frame.f_lineno</span>
+            <span class="s3">if </span><span class="s4">'__file__' </span><span class="s3">in </span><span class="s1">frame.f_globals:</span>
+                <span class="s1">filename = frame.f_globals[</span><span class="s4">'__file__'</span><span class="s1">]</span>
+                <span class="s3">if </span><span class="s1">(filename.endswith(</span><span class="s4">'.pyc'</span><span class="s1">) </span><span class="s3">or</span>
+                        <span class="s1">filename.endswith(</span><span class="s4">'.pyo'</span><span class="s1">)):</span>
+                    <span class="s1">filename = filename[:-</span><span class="s5">1</span><span class="s1">]</span>
+                <span class="s1">name = frame.f_globals[</span><span class="s4">'__name__'</span><span class="s1">]</span>
+                <span class="s1">line = linecache.getline(filename</span><span class="s3">, </span><span class="s1">lineno)</span>
+            <span class="s3">else</span><span class="s1">:</span>
+                <span class="s1">name = </span><span class="s4">'[unknown]'</span>
+                <span class="s3">try</span><span class="s1">:</span>
+                    <span class="s1">src = inspect.getsourcelines(frame)</span>
+                    <span class="s1">line = src[lineno]</span>
+                <span class="s3">except </span><span class="s1">IOError:</span>
+                    <span class="s1">line = </span><span class="s4">'Unknown code named [%s].  VM instruction #%d' </span><span class="s1">% (</span>
+                        <span class="s1">frame.f_code.co_name</span><span class="s3">, </span><span class="s1">frame.f_lasti)</span>
+            <span class="s3">if </span><span class="s1">self.trace_names </span><span class="s3">is None or </span><span class="s1">name </span><span class="s3">in </span><span class="s1">self.trace_names:</span>
+                <span class="s1">print(</span><span class="s4">'%s:%s: %s' </span><span class="s1">% (name</span><span class="s3">, </span><span class="s1">lineno</span><span class="s3">, </span><span class="s1">line.rstrip()))</span>
+                <span class="s3">if not </span><span class="s1">self.show_values:</span>
+                    <span class="s3">return </span><span class="s1">self</span>
+                <span class="s1">details = []</span>
+                <span class="s1">tokens = _token_spliter.split(line)</span>
+                <span class="s3">for </span><span class="s1">tok </span><span class="s3">in </span><span class="s1">tokens:</span>
+                    <span class="s3">if </span><span class="s1">tok </span><span class="s3">in </span><span class="s1">frame.f_globals:</span>
+                        <span class="s1">details.append(</span><span class="s4">'%s=%r' </span><span class="s1">% (tok</span><span class="s3">, </span><span class="s1">frame.f_globals[tok]))</span>
+                    <span class="s3">if </span><span class="s1">tok </span><span class="s3">in </span><span class="s1">frame.f_locals:</span>
+                        <span class="s1">details.append(</span><span class="s4">'%s=%r' </span><span class="s1">% (tok</span><span class="s3">, </span><span class="s1">frame.f_locals[tok]))</span>
+                <span class="s3">if </span><span class="s1">details:</span>
+                    <span class="s1">print(</span><span class="s4">&quot;</span><span class="s3">\t</span><span class="s4">%s&quot; </span><span class="s1">% </span><span class="s4">' '</span><span class="s1">.join(details))</span>
+        <span class="s3">return </span><span class="s1">self</span>
+
+
+<span class="s3">def </span><span class="s1">spew(trace_names=</span><span class="s3">None, </span><span class="s1">show_values=</span><span class="s3">False</span><span class="s1">):</span>
+    <span class="s2">&quot;&quot;&quot;Install a trace hook which writes incredibly detailed logs 
+    about what code is being executed to stdout. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">sys.settrace(Spew(trace_names</span><span class="s3">, </span><span class="s1">show_values))</span>
+
+
+<span class="s3">def </span><span class="s1">unspew():</span>
+    <span class="s2">&quot;&quot;&quot;Remove the trace hook installed by spew. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">sys.settrace(</span><span class="s3">None</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

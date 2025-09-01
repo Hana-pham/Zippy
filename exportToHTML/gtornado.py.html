@@ -1,0 +1,188 @@
+<html>
+<head>
+<title>gtornado.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+gtornado.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s2">try</span><span class="s1">:</span>
+    <span class="s2">import </span><span class="s1">tornado</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+    <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;You need tornado installed to use this worker.&quot;</span><span class="s1">)</span>
+<span class="s2">import </span><span class="s1">tornado.web</span>
+<span class="s2">import </span><span class="s1">tornado.httpserver</span>
+<span class="s2">from </span><span class="s1">tornado.ioloop </span><span class="s2">import </span><span class="s1">IOLoop</span><span class="s2">, </span><span class="s1">PeriodicCallback</span>
+<span class="s2">from </span><span class="s1">tornado.wsgi </span><span class="s2">import </span><span class="s1">WSGIContainer</span>
+<span class="s2">from </span><span class="s1">gunicorn.workers.base </span><span class="s2">import </span><span class="s1">Worker</span>
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">__version__ </span><span class="s2">as </span><span class="s1">gversion</span>
+<span class="s2">from </span><span class="s1">gunicorn.sock </span><span class="s2">import </span><span class="s1">ssl_context</span>
+
+
+<span class="s0"># Tornado 5.0 updated its IOLoop, and the `io_loop` arguments to many</span>
+<span class="s0"># Tornado functions have been removed in Tornado 5.0. Also, they no</span>
+<span class="s0"># longer store PeriodCallbacks in ioloop._callbacks. Instead we store</span>
+<span class="s0"># them on our side, and use stop() on them when stopping the worker.</span>
+<span class="s0"># See https://www.tornadoweb.org/en/stable/releases/v5.0.0.html#backwards-compatibility-notes</span>
+<span class="s0"># for more details.</span>
+<span class="s1">TORNADO5 = tornado.version_info &gt;= (</span><span class="s4">5</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, </span><span class="s4">0</span><span class="s1">)</span>
+
+
+<span class="s2">class </span><span class="s1">TornadoWorker(Worker):</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s2">def </span><span class="s1">setup(cls):</span>
+        <span class="s1">web = sys.modules.pop(</span><span class="s3">&quot;tornado.web&quot;</span><span class="s1">)</span>
+        <span class="s1">old_clear = web.RequestHandler.clear</span>
+
+        <span class="s2">def </span><span class="s1">clear(self):</span>
+            <span class="s1">old_clear(self)</span>
+            <span class="s2">if </span><span class="s3">&quot;Gunicorn&quot; </span><span class="s2">not in </span><span class="s1">self._headers[</span><span class="s3">&quot;Server&quot;</span><span class="s1">]:</span>
+                <span class="s1">self._headers[</span><span class="s3">&quot;Server&quot;</span><span class="s1">] += </span><span class="s3">&quot; (Gunicorn/%s)&quot; </span><span class="s1">% gversion</span>
+        <span class="s1">web.RequestHandler.clear = clear</span>
+        <span class="s1">sys.modules[</span><span class="s3">&quot;tornado.web&quot;</span><span class="s1">] = web</span>
+
+    <span class="s2">def </span><span class="s1">handle_exit(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s2">if </span><span class="s1">self.alive:</span>
+            <span class="s1">super().handle_exit(sig</span><span class="s2">, </span><span class="s1">frame)</span>
+
+    <span class="s2">def </span><span class="s1">handle_request(self):</span>
+        <span class="s1">self.nr += </span><span class="s4">1</span>
+        <span class="s2">if </span><span class="s1">self.alive </span><span class="s2">and </span><span class="s1">self.nr &gt;= self.max_requests:</span>
+            <span class="s1">self.log.info(</span><span class="s3">&quot;Autorestarting worker after current request.&quot;</span><span class="s1">)</span>
+            <span class="s1">self.alive = </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">watchdog(self):</span>
+        <span class="s2">if </span><span class="s1">self.alive:</span>
+            <span class="s1">self.notify()</span>
+
+        <span class="s2">if </span><span class="s1">self.ppid != os.getppid():</span>
+            <span class="s1">self.log.info(</span><span class="s3">&quot;Parent changed, shutting down: %s&quot;</span><span class="s2">, </span><span class="s1">self)</span>
+            <span class="s1">self.alive = </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">heartbeat(self):</span>
+        <span class="s2">if not </span><span class="s1">self.alive:</span>
+            <span class="s2">if </span><span class="s1">self.server_alive:</span>
+                <span class="s2">if </span><span class="s1">hasattr(self</span><span class="s2">, </span><span class="s3">'server'</span><span class="s1">):</span>
+                    <span class="s2">try</span><span class="s1">:</span>
+                        <span class="s1">self.server.stop()</span>
+                    <span class="s2">except </span><span class="s1">Exception:</span>
+                        <span class="s2">pass</span>
+                <span class="s1">self.server_alive = </span><span class="s2">False</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s2">if </span><span class="s1">TORNADO5:</span>
+                    <span class="s2">for </span><span class="s1">callback </span><span class="s2">in </span><span class="s1">self.callbacks:</span>
+                        <span class="s1">callback.stop()</span>
+                    <span class="s1">self.ioloop.stop()</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s2">if not </span><span class="s1">self.ioloop._callbacks:</span>
+                        <span class="s1">self.ioloop.stop()</span>
+
+    <span class="s2">def </span><span class="s1">init_process(self):</span>
+        <span class="s0"># IOLoop cannot survive a fork or be shared across processes</span>
+        <span class="s0"># in any way. When multiple processes are being used, each process</span>
+        <span class="s0"># should create its own IOLoop. We should clear current IOLoop</span>
+        <span class="s0"># if exists before os.fork.</span>
+        <span class="s1">IOLoop.clear_current()</span>
+        <span class="s1">super().init_process()</span>
+
+    <span class="s2">def </span><span class="s1">run(self):</span>
+        <span class="s1">self.ioloop = IOLoop.instance()</span>
+        <span class="s1">self.alive = </span><span class="s2">True</span>
+        <span class="s1">self.server_alive = </span><span class="s2">False</span>
+
+        <span class="s2">if </span><span class="s1">TORNADO5:</span>
+            <span class="s1">self.callbacks = []</span>
+            <span class="s1">self.callbacks.append(PeriodicCallback(self.watchdog</span><span class="s2">, </span><span class="s4">1000</span><span class="s1">))</span>
+            <span class="s1">self.callbacks.append(PeriodicCallback(self.heartbeat</span><span class="s2">, </span><span class="s4">1000</span><span class="s1">))</span>
+            <span class="s2">for </span><span class="s1">callback </span><span class="s2">in </span><span class="s1">self.callbacks:</span>
+                <span class="s1">callback.start()</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">PeriodicCallback(self.watchdog</span><span class="s2">, </span><span class="s4">1000</span><span class="s2">, </span><span class="s1">io_loop=self.ioloop).start()</span>
+            <span class="s1">PeriodicCallback(self.heartbeat</span><span class="s2">, </span><span class="s4">1000</span><span class="s2">, </span><span class="s1">io_loop=self.ioloop).start()</span>
+
+        <span class="s0"># Assume the app is a WSGI callable if its not an</span>
+        <span class="s0"># instance of tornado.web.Application or is an</span>
+        <span class="s0"># instance of tornado.wsgi.WSGIApplication</span>
+        <span class="s1">app = self.wsgi</span>
+
+        <span class="s2">if </span><span class="s1">tornado.version_info[</span><span class="s4">0</span><span class="s1">] &lt; </span><span class="s4">6</span><span class="s1">:</span>
+            <span class="s2">if not </span><span class="s1">isinstance(app</span><span class="s2">, </span><span class="s1">tornado.web.Application) </span><span class="s2">or </span><span class="s1">\</span>
+                    <span class="s1">isinstance(app</span><span class="s2">, </span><span class="s1">tornado.wsgi.WSGIApplication):</span>
+                <span class="s1">app = WSGIContainer(app)</span>
+        <span class="s2">elif not </span><span class="s1">isinstance(app</span><span class="s2">, </span><span class="s1">WSGIContainer) </span><span class="s2">and </span><span class="s1">\</span>
+                <span class="s2">not </span><span class="s1">isinstance(app</span><span class="s2">, </span><span class="s1">tornado.web.Application):</span>
+            <span class="s1">app = WSGIContainer(app)</span>
+
+        <span class="s0"># Monkey-patching HTTPConnection.finish to count the</span>
+        <span class="s0"># number of requests being handled by Tornado. This</span>
+        <span class="s0"># will help gunicorn shutdown the worker if max_requests</span>
+        <span class="s0"># is exceeded.</span>
+        <span class="s1">httpserver = sys.modules[</span><span class="s3">&quot;tornado.httpserver&quot;</span><span class="s1">]</span>
+        <span class="s2">if </span><span class="s1">hasattr(httpserver</span><span class="s2">, </span><span class="s3">'HTTPConnection'</span><span class="s1">):</span>
+            <span class="s1">old_connection_finish = httpserver.HTTPConnection.finish</span>
+
+            <span class="s2">def </span><span class="s1">finish(other):</span>
+                <span class="s1">self.handle_request()</span>
+                <span class="s1">old_connection_finish(other)</span>
+            <span class="s1">httpserver.HTTPConnection.finish = finish</span>
+            <span class="s1">sys.modules[</span><span class="s3">&quot;tornado.httpserver&quot;</span><span class="s1">] = httpserver</span>
+
+            <span class="s1">server_class = tornado.httpserver.HTTPServer</span>
+        <span class="s2">else</span><span class="s1">:</span>
+
+            <span class="s2">class </span><span class="s1">_HTTPServer(tornado.httpserver.HTTPServer):</span>
+
+                <span class="s2">def </span><span class="s1">on_close(instance</span><span class="s2">, </span><span class="s1">server_conn):</span>
+                    <span class="s1">self.handle_request()</span>
+                    <span class="s1">super(_HTTPServer</span><span class="s2">, </span><span class="s1">instance).on_close(server_conn)</span>
+
+            <span class="s1">server_class = _HTTPServer</span>
+
+        <span class="s2">if </span><span class="s1">self.cfg.is_ssl:</span>
+            <span class="s2">if </span><span class="s1">TORNADO5:</span>
+                <span class="s1">server = server_class(app</span><span class="s2">, </span><span class="s1">ssl_options=ssl_context(self.cfg))</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">server = server_class(app</span><span class="s2">, </span><span class="s1">io_loop=self.ioloop</span><span class="s2">,</span>
+                                      <span class="s1">ssl_options=ssl_context(self.cfg))</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">if </span><span class="s1">TORNADO5:</span>
+                <span class="s1">server = server_class(app)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">server = server_class(app</span><span class="s2">, </span><span class="s1">io_loop=self.ioloop)</span>
+
+        <span class="s1">self.server = server</span>
+        <span class="s1">self.server_alive = </span><span class="s2">True</span>
+
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">s.setblocking(</span><span class="s4">0</span><span class="s1">)</span>
+            <span class="s2">if </span><span class="s1">hasattr(server</span><span class="s2">, </span><span class="s3">&quot;add_socket&quot;</span><span class="s1">):  </span><span class="s0"># tornado &gt; 2.0</span>
+                <span class="s1">server.add_socket(s)</span>
+            <span class="s2">elif </span><span class="s1">hasattr(server</span><span class="s2">, </span><span class="s3">&quot;_sockets&quot;</span><span class="s1">):  </span><span class="s0"># tornado 2.0</span>
+                <span class="s1">server._sockets[s.fileno()] = s</span>
+
+        <span class="s1">server.no_keep_alive = self.cfg.keepalive &lt;= </span><span class="s4">0</span>
+        <span class="s1">server.start(num_processes=</span><span class="s4">1</span><span class="s1">)</span>
+
+        <span class="s1">self.ioloop.start()</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<html>
+<head>
+<title>_elffile.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #629755; font-style: italic;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6897bb;}
+.s4 { color: #6a8759;}
+.s5 { color: #a5c261;}
+.s6 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_elffile.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+ELF file parser. 
+ 
+This provides a class ``ELFFile`` that parses an ELF executable in a similar 
+interface to ``ZipFile``. Only the read interface is implemented. 
+ 
+Based on: https://gist.github.com/lyssdod/f51579ae8d93c8657a5564aefc2ffbca 
+ELF header: https://refspecs.linuxfoundation.org/elf/gabi4+/ch4.eheader.html 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">enum</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">struct</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">IO</span><span class="s2">, </span><span class="s1">Optional</span><span class="s2">, </span><span class="s1">Tuple</span>
+
+
+<span class="s2">class </span><span class="s1">ELFInvalid(ValueError):</span>
+    <span class="s2">pass</span>
+
+
+<span class="s2">class </span><span class="s1">EIClass(enum.IntEnum):</span>
+    <span class="s1">C32 = </span><span class="s3">1</span>
+    <span class="s1">C64 = </span><span class="s3">2</span>
+
+
+<span class="s2">class </span><span class="s1">EIData(enum.IntEnum):</span>
+    <span class="s1">Lsb = </span><span class="s3">1</span>
+    <span class="s1">Msb = </span><span class="s3">2</span>
+
+
+<span class="s2">class </span><span class="s1">EMachine(enum.IntEnum):</span>
+    <span class="s1">I386 = </span><span class="s3">3</span>
+    <span class="s1">S390 = </span><span class="s3">22</span>
+    <span class="s1">Arm = </span><span class="s3">40</span>
+    <span class="s1">X8664 = </span><span class="s3">62</span>
+    <span class="s1">AArc64 = </span><span class="s3">183</span>
+
+
+<span class="s2">class </span><span class="s1">ELFFile:</span>
+    <span class="s0">&quot;&quot;&quot; 
+    Representation of an ELF executable. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">f: IO[bytes]) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s1">self._f = f</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">ident = self._read(</span><span class="s4">&quot;16B&quot;</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">struct.error:</span>
+            <span class="s2">raise </span><span class="s1">ELFInvalid(</span><span class="s4">&quot;unable to parse identification&quot;</span><span class="s1">)</span>
+        <span class="s1">magic = bytes(ident[:</span><span class="s3">4</span><span class="s1">])</span>
+        <span class="s2">if </span><span class="s1">magic != </span><span class="s5">b&quot;</span><span class="s2">\x7f</span><span class="s5">ELF&quot;</span><span class="s1">:</span>
+            <span class="s2">raise </span><span class="s1">ELFInvalid(</span><span class="s4">f&quot;invalid magic: </span><span class="s2">{</span><span class="s1">magic</span><span class="s2">!r}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+        <span class="s1">self.capacity = ident[</span><span class="s3">4</span><span class="s1">]  </span><span class="s6"># Format for program header (bitness).</span>
+        <span class="s1">self.encoding = ident[</span><span class="s3">5</span><span class="s1">]  </span><span class="s6"># Data structure encoding (endianness).</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s6"># e_fmt: Format for program header.</span>
+            <span class="s6"># p_fmt: Format for section header.</span>
+            <span class="s6"># p_idx: Indexes to find p_type, p_offset, and p_filesz.</span>
+            <span class="s1">e_fmt</span><span class="s2">, </span><span class="s1">self._p_fmt</span><span class="s2">, </span><span class="s1">self._p_idx = {</span>
+                <span class="s1">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">1</span><span class="s1">): (</span><span class="s4">&quot;&lt;HHIIIIIHHH&quot;</span><span class="s2">, </span><span class="s4">&quot;&lt;IIIIIIII&quot;</span><span class="s2">, </span><span class="s1">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">1</span><span class="s2">, </span><span class="s3">4</span><span class="s1">))</span><span class="s2">,  </span><span class="s6"># 32-bit LSB.</span>
+                <span class="s1">(</span><span class="s3">1</span><span class="s2">, </span><span class="s3">2</span><span class="s1">): (</span><span class="s4">&quot;&gt;HHIIIIIHHH&quot;</span><span class="s2">, </span><span class="s4">&quot;&gt;IIIIIIII&quot;</span><span class="s2">, </span><span class="s1">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">1</span><span class="s2">, </span><span class="s3">4</span><span class="s1">))</span><span class="s2">,  </span><span class="s6"># 32-bit MSB.</span>
+                <span class="s1">(</span><span class="s3">2</span><span class="s2">, </span><span class="s3">1</span><span class="s1">): (</span><span class="s4">&quot;&lt;HHIQQQIHHH&quot;</span><span class="s2">, </span><span class="s4">&quot;&lt;IIQQQQQQ&quot;</span><span class="s2">, </span><span class="s1">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">, </span><span class="s3">5</span><span class="s1">))</span><span class="s2">,  </span><span class="s6"># 64-bit LSB.</span>
+                <span class="s1">(</span><span class="s3">2</span><span class="s2">, </span><span class="s3">2</span><span class="s1">): (</span><span class="s4">&quot;&gt;HHIQQQIHHH&quot;</span><span class="s2">, </span><span class="s4">&quot;&gt;IIQQQQQQ&quot;</span><span class="s2">, </span><span class="s1">(</span><span class="s3">0</span><span class="s2">, </span><span class="s3">2</span><span class="s2">, </span><span class="s3">5</span><span class="s1">))</span><span class="s2">,  </span><span class="s6"># 64-bit MSB.</span>
+            <span class="s1">}[(self.capacity</span><span class="s2">, </span><span class="s1">self.encoding)]</span>
+        <span class="s2">except </span><span class="s1">KeyError:</span>
+            <span class="s2">raise </span><span class="s1">ELFInvalid(</span>
+                <span class="s4">f&quot;unrecognized capacity (</span><span class="s2">{</span><span class="s1">self.capacity</span><span class="s2">}</span><span class="s4">) or &quot;</span>
+                <span class="s4">f&quot;encoding (</span><span class="s2">{</span><span class="s1">self.encoding</span><span class="s2">}</span><span class="s4">)&quot;</span>
+            <span class="s1">)</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">(</span>
+                <span class="s1">_</span><span class="s2">,</span>
+                <span class="s1">self.machine</span><span class="s2">,  </span><span class="s6"># Architecture type.</span>
+                <span class="s1">_</span><span class="s2">,</span>
+                <span class="s1">_</span><span class="s2">,</span>
+                <span class="s1">self._e_phoff</span><span class="s2">,  </span><span class="s6"># Offset of program header.</span>
+                <span class="s1">_</span><span class="s2">,</span>
+                <span class="s1">self.flags</span><span class="s2">,  </span><span class="s6"># Processor-specific flags.</span>
+                <span class="s1">_</span><span class="s2">,</span>
+                <span class="s1">self._e_phentsize</span><span class="s2">,  </span><span class="s6"># Size of section.</span>
+                <span class="s1">self._e_phnum</span><span class="s2">,  </span><span class="s6"># Number of sections.</span>
+            <span class="s1">) = self._read(e_fmt)</span>
+        <span class="s2">except </span><span class="s1">struct.error </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">raise </span><span class="s1">ELFInvalid(</span><span class="s4">&quot;unable to parse machine and section information&quot;</span><span class="s1">) </span><span class="s2">from </span><span class="s1">e</span>
+
+    <span class="s2">def </span><span class="s1">_read(self</span><span class="s2">, </span><span class="s1">fmt: str) -&gt; Tuple[int</span><span class="s2">, </span><span class="s1">...]:</span>
+        <span class="s2">return </span><span class="s1">struct.unpack(fmt</span><span class="s2">, </span><span class="s1">self._f.read(struct.calcsize(fmt)))</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">interpreter(self) -&gt; Optional[str]:</span>
+        <span class="s0">&quot;&quot;&quot; 
+        The path recorded in the ``PT_INTERP`` section header. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">for </span><span class="s1">index </span><span class="s2">in </span><span class="s1">range(self._e_phnum):</span>
+            <span class="s1">self._f.seek(self._e_phoff + self._e_phentsize * index)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">data = self._read(self._p_fmt)</span>
+            <span class="s2">except </span><span class="s1">struct.error:</span>
+                <span class="s2">continue</span>
+            <span class="s2">if </span><span class="s1">data[self._p_idx[</span><span class="s3">0</span><span class="s1">]] != </span><span class="s3">3</span><span class="s1">:  </span><span class="s6"># Not PT_INTERP.</span>
+                <span class="s2">continue</span>
+            <span class="s1">self._f.seek(data[self._p_idx[</span><span class="s3">1</span><span class="s1">]])</span>
+            <span class="s2">return </span><span class="s1">os.fsdecode(self._f.read(data[self._p_idx[</span><span class="s3">2</span><span class="s1">]])).strip(</span><span class="s4">&quot;</span><span class="s2">\0</span><span class="s4">&quot;</span><span class="s1">)</span>
+        <span class="s2">return None</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,284 @@
+<html>
+<head>
+<title>body.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+body.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s2">from </span><span class="s1">gunicorn.http.errors </span><span class="s2">import </span><span class="s1">(NoMoreData</span><span class="s2">, </span><span class="s1">ChunkMissingTerminator</span><span class="s2">,</span>
+                                  <span class="s1">InvalidChunkSize)</span>
+
+
+<span class="s2">class </span><span class="s1">ChunkedReader(object):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">unreader):</span>
+        <span class="s1">self.req = req</span>
+        <span class="s1">self.parser = self.parse_chunked(unreader)</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+
+    <span class="s2">def </span><span class="s1">read(self</span><span class="s2">, </span><span class="s1">size):</span>
+        <span class="s2">if not </span><span class="s1">isinstance(size</span><span class="s2">, </span><span class="s1">int):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;size must be an integer type&quot;</span><span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">size &lt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Size must be positive.&quot;</span><span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">size == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">self.parser:</span>
+            <span class="s2">while </span><span class="s1">self.buf.tell() &lt; size:</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s1">self.buf.write(next(self.parser))</span>
+                <span class="s2">except </span><span class="s1">StopIteration:</span>
+                    <span class="s1">self.parser = </span><span class="s2">None</span>
+                    <span class="s2">break</span>
+
+        <span class="s1">data = self.buf.getvalue()</span>
+        <span class="s1">ret</span><span class="s2">, </span><span class="s1">rest = data[:size]</span><span class="s2">, </span><span class="s1">data[size:]</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+        <span class="s1">self.buf.write(rest)</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+    <span class="s2">def </span><span class="s1">parse_trailers(self</span><span class="s2">, </span><span class="s1">unreader</span><span class="s2">, </span><span class="s1">data):</span>
+        <span class="s1">buf = io.BytesIO()</span>
+        <span class="s1">buf.write(data)</span>
+
+        <span class="s1">idx = buf.getvalue().find(</span><span class="s5">b&quot;</span><span class="s2">\r\n\r\n</span><span class="s5">&quot;</span><span class="s1">)</span>
+        <span class="s1">done = buf.getvalue()[:</span><span class="s4">2</span><span class="s1">] == </span><span class="s5">b&quot;</span><span class="s2">\r\n</span><span class="s5">&quot;</span>
+        <span class="s2">while </span><span class="s1">idx &lt; </span><span class="s4">0 </span><span class="s2">and not </span><span class="s1">done:</span>
+            <span class="s1">self.get_data(unreader</span><span class="s2">, </span><span class="s1">buf)</span>
+            <span class="s1">idx = buf.getvalue().find(</span><span class="s5">b&quot;</span><span class="s2">\r\n\r\n</span><span class="s5">&quot;</span><span class="s1">)</span>
+            <span class="s1">done = buf.getvalue()[:</span><span class="s4">2</span><span class="s1">] == </span><span class="s5">b&quot;</span><span class="s2">\r\n</span><span class="s5">&quot;</span>
+        <span class="s2">if </span><span class="s1">done:</span>
+            <span class="s1">unreader.unread(buf.getvalue()[</span><span class="s4">2</span><span class="s1">:])</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+        <span class="s1">self.req.trailers = self.req.parse_headers(buf.getvalue()[:idx])</span>
+        <span class="s1">unreader.unread(buf.getvalue()[idx + </span><span class="s4">4</span><span class="s1">:])</span>
+
+    <span class="s2">def </span><span class="s1">parse_chunked(self</span><span class="s2">, </span><span class="s1">unreader):</span>
+        <span class="s1">(size</span><span class="s2">, </span><span class="s1">rest) = self.parse_chunk_size(unreader)</span>
+        <span class="s2">while </span><span class="s1">size &gt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">while </span><span class="s1">size &gt; len(rest):</span>
+                <span class="s1">size -= len(rest)</span>
+                <span class="s2">yield </span><span class="s1">rest</span>
+                <span class="s1">rest = unreader.read()</span>
+                <span class="s2">if not </span><span class="s1">rest:</span>
+                    <span class="s2">raise </span><span class="s1">NoMoreData()</span>
+            <span class="s2">yield </span><span class="s1">rest[:size]</span>
+            <span class="s0"># Remove \r\n after chunk</span>
+            <span class="s1">rest = rest[size:]</span>
+            <span class="s2">while </span><span class="s1">len(rest) &lt; </span><span class="s4">2</span><span class="s1">:</span>
+                <span class="s1">rest += unreader.read()</span>
+            <span class="s2">if </span><span class="s1">rest[:</span><span class="s4">2</span><span class="s1">] != </span><span class="s5">b'</span><span class="s2">\r\n</span><span class="s5">'</span><span class="s1">:</span>
+                <span class="s2">raise </span><span class="s1">ChunkMissingTerminator(rest[:</span><span class="s4">2</span><span class="s1">])</span>
+            <span class="s1">(size</span><span class="s2">, </span><span class="s1">rest) = self.parse_chunk_size(unreader</span><span class="s2">, </span><span class="s1">data=rest[</span><span class="s4">2</span><span class="s1">:])</span>
+
+    <span class="s2">def </span><span class="s1">parse_chunk_size(self</span><span class="s2">, </span><span class="s1">unreader</span><span class="s2">, </span><span class="s1">data=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">buf = io.BytesIO()</span>
+        <span class="s2">if </span><span class="s1">data </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">buf.write(data)</span>
+
+        <span class="s1">idx = buf.getvalue().find(</span><span class="s5">b&quot;</span><span class="s2">\r\n</span><span class="s5">&quot;</span><span class="s1">)</span>
+        <span class="s2">while </span><span class="s1">idx &lt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">self.get_data(unreader</span><span class="s2">, </span><span class="s1">buf)</span>
+            <span class="s1">idx = buf.getvalue().find(</span><span class="s5">b&quot;</span><span class="s2">\r\n</span><span class="s5">&quot;</span><span class="s1">)</span>
+
+        <span class="s1">data = buf.getvalue()</span>
+        <span class="s1">line</span><span class="s2">, </span><span class="s1">rest_chunk = data[:idx]</span><span class="s2">, </span><span class="s1">data[idx + </span><span class="s4">2</span><span class="s1">:]</span>
+
+        <span class="s1">chunk_size = line.split(</span><span class="s5">b&quot;;&quot;</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)[</span><span class="s4">0</span><span class="s1">].strip()</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">chunk_size = int(chunk_size</span><span class="s2">, </span><span class="s4">16</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">ValueError:</span>
+            <span class="s2">raise </span><span class="s1">InvalidChunkSize(chunk_size)</span>
+
+        <span class="s2">if </span><span class="s1">chunk_size == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">self.parse_trailers(unreader</span><span class="s2">, </span><span class="s1">rest_chunk)</span>
+            <span class="s2">except </span><span class="s1">NoMoreData:</span>
+                <span class="s2">pass</span>
+            <span class="s2">return </span><span class="s1">(</span><span class="s4">0</span><span class="s2">, None</span><span class="s1">)</span>
+        <span class="s2">return </span><span class="s1">(chunk_size</span><span class="s2">, </span><span class="s1">rest_chunk)</span>
+
+    <span class="s2">def </span><span class="s1">get_data(self</span><span class="s2">, </span><span class="s1">unreader</span><span class="s2">, </span><span class="s1">buf):</span>
+        <span class="s1">data = unreader.read()</span>
+        <span class="s2">if not </span><span class="s1">data:</span>
+            <span class="s2">raise </span><span class="s1">NoMoreData()</span>
+        <span class="s1">buf.write(data)</span>
+
+
+<span class="s2">class </span><span class="s1">LengthReader(object):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">unreader</span><span class="s2">, </span><span class="s1">length):</span>
+        <span class="s1">self.unreader = unreader</span>
+        <span class="s1">self.length = length</span>
+
+    <span class="s2">def </span><span class="s1">read(self</span><span class="s2">, </span><span class="s1">size):</span>
+        <span class="s2">if not </span><span class="s1">isinstance(size</span><span class="s2">, </span><span class="s1">int):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;size must be an integral type&quot;</span><span class="s1">)</span>
+
+        <span class="s1">size = min(self.length</span><span class="s2">, </span><span class="s1">size)</span>
+        <span class="s2">if </span><span class="s1">size &lt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Size must be positive.&quot;</span><span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">size == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+
+        <span class="s1">buf = io.BytesIO()</span>
+        <span class="s1">data = self.unreader.read()</span>
+        <span class="s2">while </span><span class="s1">data:</span>
+            <span class="s1">buf.write(data)</span>
+            <span class="s2">if </span><span class="s1">buf.tell() &gt;= size:</span>
+                <span class="s2">break</span>
+            <span class="s1">data = self.unreader.read()</span>
+
+        <span class="s1">buf = buf.getvalue()</span>
+        <span class="s1">ret</span><span class="s2">, </span><span class="s1">rest = buf[:size]</span><span class="s2">, </span><span class="s1">buf[size:]</span>
+        <span class="s1">self.unreader.unread(rest)</span>
+        <span class="s1">self.length -= size</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+
+<span class="s2">class </span><span class="s1">EOFReader(object):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">unreader):</span>
+        <span class="s1">self.unreader = unreader</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+        <span class="s1">self.finished = </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">read(self</span><span class="s2">, </span><span class="s1">size):</span>
+        <span class="s2">if not </span><span class="s1">isinstance(size</span><span class="s2">, </span><span class="s1">int):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;size must be an integral type&quot;</span><span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">size &lt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Size must be positive.&quot;</span><span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">size == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">self.finished:</span>
+            <span class="s1">data = self.buf.getvalue()</span>
+            <span class="s1">ret</span><span class="s2">, </span><span class="s1">rest = data[:size]</span><span class="s2">, </span><span class="s1">data[size:]</span>
+            <span class="s1">self.buf = io.BytesIO()</span>
+            <span class="s1">self.buf.write(rest)</span>
+            <span class="s2">return </span><span class="s1">ret</span>
+
+        <span class="s1">data = self.unreader.read()</span>
+        <span class="s2">while </span><span class="s1">data:</span>
+            <span class="s1">self.buf.write(data)</span>
+            <span class="s2">if </span><span class="s1">self.buf.tell() &gt; size:</span>
+                <span class="s2">break</span>
+            <span class="s1">data = self.unreader.read()</span>
+
+        <span class="s2">if not </span><span class="s1">data:</span>
+            <span class="s1">self.finished = </span><span class="s2">True</span>
+
+        <span class="s1">data = self.buf.getvalue()</span>
+        <span class="s1">ret</span><span class="s2">, </span><span class="s1">rest = data[:size]</span><span class="s2">, </span><span class="s1">data[size:]</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+        <span class="s1">self.buf.write(rest)</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+
+<span class="s2">class </span><span class="s1">Body(object):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">reader):</span>
+        <span class="s1">self.reader = reader</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+
+    <span class="s2">def </span><span class="s1">__iter__(self):</span>
+        <span class="s2">return </span><span class="s1">self</span>
+
+    <span class="s2">def </span><span class="s1">__next__(self):</span>
+        <span class="s1">ret = self.readline()</span>
+        <span class="s2">if not </span><span class="s1">ret:</span>
+            <span class="s2">raise </span><span class="s1">StopIteration()</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+    <span class="s1">next = __next__</span>
+
+    <span class="s2">def </span><span class="s1">getsize(self</span><span class="s2">, </span><span class="s1">size):</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">sys.maxsize</span>
+        <span class="s2">elif not </span><span class="s1">isinstance(size</span><span class="s2">, </span><span class="s1">int):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;size must be an integral type&quot;</span><span class="s1">)</span>
+        <span class="s2">elif </span><span class="s1">size &lt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">sys.maxsize</span>
+        <span class="s2">return </span><span class="s1">size</span>
+
+    <span class="s2">def </span><span class="s1">read(self</span><span class="s2">, </span><span class="s1">size=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">size = self.getsize(size)</span>
+        <span class="s2">if </span><span class="s1">size == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">size &lt; self.buf.tell():</span>
+            <span class="s1">data = self.buf.getvalue()</span>
+            <span class="s1">ret</span><span class="s2">, </span><span class="s1">rest = data[:size]</span><span class="s2">, </span><span class="s1">data[size:]</span>
+            <span class="s1">self.buf = io.BytesIO()</span>
+            <span class="s1">self.buf.write(rest)</span>
+            <span class="s2">return </span><span class="s1">ret</span>
+
+        <span class="s2">while </span><span class="s1">size &gt; self.buf.tell():</span>
+            <span class="s1">data = self.reader.read(</span><span class="s4">1024</span><span class="s1">)</span>
+            <span class="s2">if not </span><span class="s1">data:</span>
+                <span class="s2">break</span>
+            <span class="s1">self.buf.write(data)</span>
+
+        <span class="s1">data = self.buf.getvalue()</span>
+        <span class="s1">ret</span><span class="s2">, </span><span class="s1">rest = data[:size]</span><span class="s2">, </span><span class="s1">data[size:]</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+        <span class="s1">self.buf.write(rest)</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+
+    <span class="s2">def </span><span class="s1">readline(self</span><span class="s2">, </span><span class="s1">size=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">size = self.getsize(size)</span>
+        <span class="s2">if </span><span class="s1">size == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+
+        <span class="s1">data = self.buf.getvalue()</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+
+        <span class="s1">ret = []</span>
+        <span class="s2">while </span><span class="s4">1</span><span class="s1">:</span>
+            <span class="s1">idx = data.find(</span><span class="s5">b&quot;</span><span class="s2">\n</span><span class="s5">&quot;</span><span class="s2">, </span><span class="s4">0</span><span class="s2">, </span><span class="s1">size)</span>
+            <span class="s1">idx = idx + </span><span class="s4">1 </span><span class="s2">if </span><span class="s1">idx &gt;= </span><span class="s4">0 </span><span class="s2">else </span><span class="s1">size </span><span class="s2">if </span><span class="s1">len(data) &gt;= size </span><span class="s2">else </span><span class="s4">0</span>
+            <span class="s2">if </span><span class="s1">idx:</span>
+                <span class="s1">ret.append(data[:idx])</span>
+                <span class="s1">self.buf.write(data[idx:])</span>
+                <span class="s2">break</span>
+
+            <span class="s1">ret.append(data)</span>
+            <span class="s1">size -= len(data)</span>
+            <span class="s1">data = self.reader.read(min(</span><span class="s4">1024</span><span class="s2">, </span><span class="s1">size))</span>
+            <span class="s2">if not </span><span class="s1">data:</span>
+                <span class="s2">break</span>
+
+        <span class="s2">return </span><span class="s5">b&quot;&quot;</span><span class="s1">.join(ret)</span>
+
+    <span class="s2">def </span><span class="s1">readlines(self</span><span class="s2">, </span><span class="s1">size=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">ret = []</span>
+        <span class="s1">data = self.read()</span>
+        <span class="s2">while </span><span class="s1">data:</span>
+            <span class="s1">pos = data.find(</span><span class="s5">b&quot;</span><span class="s2">\n</span><span class="s5">&quot;</span><span class="s1">)</span>
+            <span class="s2">if </span><span class="s1">pos &lt; </span><span class="s4">0</span><span class="s1">:</span>
+                <span class="s1">ret.append(data)</span>
+                <span class="s1">data = </span><span class="s5">b&quot;&quot;</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">line</span><span class="s2">, </span><span class="s1">data = data[:pos + </span><span class="s4">1</span><span class="s1">]</span><span class="s2">, </span><span class="s1">data[pos + </span><span class="s4">1</span><span class="s1">:]</span>
+                <span class="s1">ret.append(line)</span>
+        <span class="s2">return </span><span class="s1">ret</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<html>
+<head>
+<title>etag.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+etag.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Collection</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterator</span>
+
+<span class="s0">class </span><span class="s1">ETags(Collection[str]):</span>
+    <span class="s1">_strong: frozenset[str]</span>
+    <span class="s1">_weak: frozenset[str]</span>
+    <span class="s1">star_tag: bool</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">strong_etags: Iterable[str] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">weak_etags: Iterable[str] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">star_tag: bool = </span><span class="s0">False,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">as_set(self</span><span class="s0">, </span><span class="s1">include_weak: bool = </span><span class="s0">False</span><span class="s1">) -&gt; set[str]: ...</span>
+    <span class="s0">def </span><span class="s1">is_weak(self</span><span class="s0">, </span><span class="s1">etag: str) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">is_strong(self</span><span class="s0">, </span><span class="s1">etag: str) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">contains_weak(self</span><span class="s0">, </span><span class="s1">etag: str) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">contains(self</span><span class="s0">, </span><span class="s1">etag: str) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">contains_raw(self</span><span class="s0">, </span><span class="s1">etag: str) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+    <span class="s0">def </span><span class="s1">__call__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">etag: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">data: bytes | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">include_weak: bool = </span><span class="s0">False,</span>
+    <span class="s1">) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">__len__(self) -&gt; int: ...</span>
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; Iterator[str]: ...</span>
+    <span class="s0">def </span><span class="s1">__contains__(self</span><span class="s0">, </span><span class="s1">item: str) -&gt; bool: ...  </span><span class="s2"># type: ignore</span>
+</pre>
+</body>
+</html>

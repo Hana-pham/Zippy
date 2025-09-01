@@ -1,0 +1,71 @@
+<html>
+<head>
+<title>globals.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+.s3 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+globals.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">contextvars </span><span class="s0">import </span><span class="s1">ContextVar</span>
+
+<span class="s0">from </span><span class="s1">werkzeug.local </span><span class="s0">import </span><span class="s1">LocalProxy</span>
+
+<span class="s0">if </span><span class="s1">t.TYPE_CHECKING:  </span><span class="s2"># pragma: no cover</span>
+    <span class="s0">from </span><span class="s1">.app </span><span class="s0">import </span><span class="s1">Flask</span>
+    <span class="s0">from </span><span class="s1">.ctx </span><span class="s0">import </span><span class="s1">_AppCtxGlobals</span>
+    <span class="s0">from </span><span class="s1">.ctx </span><span class="s0">import </span><span class="s1">AppContext</span>
+    <span class="s0">from </span><span class="s1">.ctx </span><span class="s0">import </span><span class="s1">RequestContext</span>
+    <span class="s0">from </span><span class="s1">.sessions </span><span class="s0">import </span><span class="s1">SessionMixin</span>
+    <span class="s0">from </span><span class="s1">.wrappers </span><span class="s0">import </span><span class="s1">Request</span>
+
+
+<span class="s1">_no_app_msg = </span><span class="s3">&quot;&quot;&quot;</span><span class="s0">\ 
+</span><span class="s3">Working outside of application context. 
+ 
+This typically means that you attempted to use functionality that needed 
+the current application. To solve this, set up an application context 
+with app.app_context(). See the documentation for more information.</span><span class="s0">\ 
+</span><span class="s3">&quot;&quot;&quot;</span>
+<span class="s1">_cv_app: ContextVar[AppContext] = ContextVar(</span><span class="s3">&quot;flask.app_ctx&quot;</span><span class="s1">)</span>
+<span class="s1">app_ctx: AppContext = LocalProxy(  </span><span class="s2"># type: ignore[assignment]</span>
+    <span class="s1">_cv_app</span><span class="s0">, </span><span class="s1">unbound_message=_no_app_msg</span>
+<span class="s1">)</span>
+<span class="s1">current_app: Flask = LocalProxy(  </span><span class="s2"># type: ignore[assignment]</span>
+    <span class="s1">_cv_app</span><span class="s0">, </span><span class="s3">&quot;app&quot;</span><span class="s0">, </span><span class="s1">unbound_message=_no_app_msg</span>
+<span class="s1">)</span>
+<span class="s1">g: _AppCtxGlobals = LocalProxy(  </span><span class="s2"># type: ignore[assignment]</span>
+    <span class="s1">_cv_app</span><span class="s0">, </span><span class="s3">&quot;g&quot;</span><span class="s0">, </span><span class="s1">unbound_message=_no_app_msg</span>
+<span class="s1">)</span>
+
+<span class="s1">_no_req_msg = </span><span class="s3">&quot;&quot;&quot;</span><span class="s0">\ 
+</span><span class="s3">Working outside of request context. 
+ 
+This typically means that you attempted to use functionality that needed 
+an active HTTP request. Consult the documentation on testing for 
+information about how to avoid this problem.</span><span class="s0">\ 
+</span><span class="s3">&quot;&quot;&quot;</span>
+<span class="s1">_cv_request: ContextVar[RequestContext] = ContextVar(</span><span class="s3">&quot;flask.request_ctx&quot;</span><span class="s1">)</span>
+<span class="s1">request_ctx: RequestContext = LocalProxy(  </span><span class="s2"># type: ignore[assignment]</span>
+    <span class="s1">_cv_request</span><span class="s0">, </span><span class="s1">unbound_message=_no_req_msg</span>
+<span class="s1">)</span>
+<span class="s1">request: Request = LocalProxy(  </span><span class="s2"># type: ignore[assignment]</span>
+    <span class="s1">_cv_request</span><span class="s0">, </span><span class="s3">&quot;request&quot;</span><span class="s0">, </span><span class="s1">unbound_message=_no_req_msg</span>
+<span class="s1">)</span>
+<span class="s1">session: SessionMixin = LocalProxy(  </span><span class="s2"># type: ignore[assignment]</span>
+    <span class="s1">_cv_request</span><span class="s0">, </span><span class="s3">&quot;session&quot;</span><span class="s0">, </span><span class="s1">unbound_message=_no_req_msg</span>
+<span class="s1">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<html>
+<head>
+<title>self_outdated_check.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #808080;}
+.s4 { color: #629755; font-style: italic;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+self_outdated_check.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">datetime</span>
+<span class="s0">import </span><span class="s1">functools</span>
+<span class="s0">import </span><span class="s1">hashlib</span>
+<span class="s0">import </span><span class="s1">json</span>
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">optparse</span>
+<span class="s0">import </span><span class="s1">os.path</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">from </span><span class="s1">dataclasses </span><span class="s0">import </span><span class="s1">dataclass</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Any</span><span class="s0">, </span><span class="s1">Callable</span><span class="s0">, </span><span class="s1">Dict</span><span class="s0">, </span><span class="s1">Optional</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.packaging.version </span><span class="s0">import </span><span class="s1">parse </span><span class="s0">as </span><span class="s1">parse_version</span>
+<span class="s0">from </span><span class="s1">pip._vendor.rich.console </span><span class="s0">import </span><span class="s1">Group</span>
+<span class="s0">from </span><span class="s1">pip._vendor.rich.markup </span><span class="s0">import </span><span class="s1">escape</span>
+<span class="s0">from </span><span class="s1">pip._vendor.rich.text </span><span class="s0">import </span><span class="s1">Text</span>
+
+<span class="s0">from </span><span class="s1">pip._internal.index.collector </span><span class="s0">import </span><span class="s1">LinkCollector</span>
+<span class="s0">from </span><span class="s1">pip._internal.index.package_finder </span><span class="s0">import </span><span class="s1">PackageFinder</span>
+<span class="s0">from </span><span class="s1">pip._internal.metadata </span><span class="s0">import </span><span class="s1">get_default_environment</span>
+<span class="s0">from </span><span class="s1">pip._internal.metadata.base </span><span class="s0">import </span><span class="s1">DistributionVersion</span>
+<span class="s0">from </span><span class="s1">pip._internal.models.selection_prefs </span><span class="s0">import </span><span class="s1">SelectionPreferences</span>
+<span class="s0">from </span><span class="s1">pip._internal.network.session </span><span class="s0">import </span><span class="s1">PipSession</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.compat </span><span class="s0">import </span><span class="s1">WINDOWS</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.entrypoints </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">get_best_invocation_for_this_pip</span><span class="s0">,</span>
+    <span class="s1">get_best_invocation_for_this_python</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.filesystem </span><span class="s0">import </span><span class="s1">adjacent_tmp_file</span><span class="s0">, </span><span class="s1">check_path_owner</span><span class="s0">, </span><span class="s1">replace</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.misc </span><span class="s0">import </span><span class="s1">ensure_dir</span>
+
+<span class="s1">_DATE_FMT = </span><span class="s2">&quot;%Y-%m-%dT%H:%M:%SZ&quot;</span>
+
+
+<span class="s1">logger = logging.getLogger(__name__)</span>
+
+
+<span class="s0">def </span><span class="s1">_get_statefile_name(key: str) -&gt; str:</span>
+    <span class="s1">key_bytes = key.encode()</span>
+    <span class="s1">name = hashlib.sha224(key_bytes).hexdigest()</span>
+    <span class="s0">return </span><span class="s1">name</span>
+
+
+<span class="s0">class </span><span class="s1">SelfCheckState:</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">cache_dir: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._state: Dict[str</span><span class="s0">, </span><span class="s1">Any] = {}</span>
+        <span class="s1">self._statefile_path = </span><span class="s0">None</span>
+
+        <span class="s3"># Try to load the existing state</span>
+        <span class="s0">if </span><span class="s1">cache_dir:</span>
+            <span class="s1">self._statefile_path = os.path.join(</span>
+                <span class="s1">cache_dir</span><span class="s0">, </span><span class="s2">&quot;selfcheck&quot;</span><span class="s0">, </span><span class="s1">_get_statefile_name(self.key)</span>
+            <span class="s1">)</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s0">with </span><span class="s1">open(self._statefile_path</span><span class="s0">, </span><span class="s1">encoding=</span><span class="s2">&quot;utf-8&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">statefile:</span>
+                    <span class="s1">self._state = json.load(statefile)</span>
+            <span class="s0">except </span><span class="s1">(OSError</span><span class="s0">, </span><span class="s1">ValueError</span><span class="s0">, </span><span class="s1">KeyError):</span>
+                <span class="s3"># Explicitly suppressing exceptions, since we don't want to</span>
+                <span class="s3"># error out if the cache file is invalid.</span>
+                <span class="s0">pass</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">key(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s1">sys.prefix</span>
+
+    <span class="s0">def </span><span class="s1">get(self</span><span class="s0">, </span><span class="s1">current_time: datetime.datetime) -&gt; Optional[str]:</span>
+        <span class="s4">&quot;&quot;&quot;Check if we have a not-outdated version loaded already.&quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self._state:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">if </span><span class="s2">&quot;last_check&quot; </span><span class="s0">not in </span><span class="s1">self._state:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">if </span><span class="s2">&quot;pypi_version&quot; </span><span class="s0">not in </span><span class="s1">self._state:</span>
+            <span class="s0">return None</span>
+
+        <span class="s1">seven_days_in_seconds = </span><span class="s5">7 </span><span class="s1">* </span><span class="s5">24 </span><span class="s1">* </span><span class="s5">60 </span><span class="s1">* </span><span class="s5">60</span>
+
+        <span class="s3"># Determine if we need to refresh the state</span>
+        <span class="s1">last_check = datetime.datetime.strptime(self._state[</span><span class="s2">&quot;last_check&quot;</span><span class="s1">]</span><span class="s0">, </span><span class="s1">_DATE_FMT)</span>
+        <span class="s1">seconds_since_last_check = (current_time - last_check).total_seconds()</span>
+        <span class="s0">if </span><span class="s1">seconds_since_last_check &gt; seven_days_in_seconds:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">return </span><span class="s1">self._state[</span><span class="s2">&quot;pypi_version&quot;</span><span class="s1">]</span>
+
+    <span class="s0">def </span><span class="s1">set(self</span><span class="s0">, </span><span class="s1">pypi_version: str</span><span class="s0">, </span><span class="s1">current_time: datetime.datetime) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s3"># If we do not have a path to cache in, don't bother saving.</span>
+        <span class="s0">if not </span><span class="s1">self._statefile_path:</span>
+            <span class="s0">return</span>
+
+        <span class="s3"># Check to make sure that we own the directory</span>
+        <span class="s0">if not </span><span class="s1">check_path_owner(os.path.dirname(self._statefile_path)):</span>
+            <span class="s0">return</span>
+
+        <span class="s3"># Now that we've ensured the directory is owned by this user, we'll go</span>
+        <span class="s3"># ahead and make sure that all our directories are created.</span>
+        <span class="s1">ensure_dir(os.path.dirname(self._statefile_path))</span>
+
+        <span class="s1">state = {</span>
+            <span class="s3"># Include the key so it's easy to tell which pip wrote the</span>
+            <span class="s3"># file.</span>
+            <span class="s2">&quot;key&quot;</span><span class="s1">: self.key</span><span class="s0">,</span>
+            <span class="s2">&quot;last_check&quot;</span><span class="s1">: current_time.strftime(_DATE_FMT)</span><span class="s0">,</span>
+            <span class="s2">&quot;pypi_version&quot;</span><span class="s1">: pypi_version</span><span class="s0">,</span>
+        <span class="s1">}</span>
+
+        <span class="s1">text = json.dumps(state</span><span class="s0">, </span><span class="s1">sort_keys=</span><span class="s0">True, </span><span class="s1">separators=(</span><span class="s2">&quot;,&quot;</span><span class="s0">, </span><span class="s2">&quot;:&quot;</span><span class="s1">))</span>
+
+        <span class="s0">with </span><span class="s1">adjacent_tmp_file(self._statefile_path) </span><span class="s0">as </span><span class="s1">f:</span>
+            <span class="s1">f.write(text.encode())</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s3"># Since we have a prefix-specific state file, we can just</span>
+            <span class="s3"># overwrite whatever is there, no need to check.</span>
+            <span class="s1">replace(f.name</span><span class="s0">, </span><span class="s1">self._statefile_path)</span>
+        <span class="s0">except </span><span class="s1">OSError:</span>
+            <span class="s3"># Best effort.</span>
+            <span class="s0">pass</span>
+
+
+<span class="s1">@dataclass</span>
+<span class="s0">class </span><span class="s1">UpgradePrompt:</span>
+    <span class="s1">old: str</span>
+    <span class="s1">new: str</span>
+
+    <span class="s0">def </span><span class="s1">__rich__(self) -&gt; Group:</span>
+        <span class="s0">if </span><span class="s1">WINDOWS:</span>
+            <span class="s1">pip_cmd = </span><span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">get_best_invocation_for_this_python()</span><span class="s0">} </span><span class="s2">-m pip&quot;</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">pip_cmd = get_best_invocation_for_this_pip()</span>
+
+        <span class="s1">notice = </span><span class="s2">&quot;[bold][[reset][blue]notice[reset][bold]][reset]&quot;</span>
+        <span class="s0">return </span><span class="s1">Group(</span>
+            <span class="s1">Text()</span><span class="s0">,</span>
+            <span class="s1">Text.from_markup(</span>
+                <span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">notice</span><span class="s0">} </span><span class="s2">A new release of pip is available: &quot;</span>
+                <span class="s2">f&quot;[red]</span><span class="s0">{</span><span class="s1">self.old</span><span class="s0">}</span><span class="s2">[reset] -&gt; [green]</span><span class="s0">{</span><span class="s1">self.new</span><span class="s0">}</span><span class="s2">[reset]&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">Text.from_markup(</span>
+                <span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">notice</span><span class="s0">} </span><span class="s2">To update, run: &quot;</span>
+                <span class="s2">f&quot;[green]</span><span class="s0">{</span><span class="s1">escape(pip_cmd)</span><span class="s0">} </span><span class="s2">install --upgrade pip&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">was_installed_by_pip(pkg: str) -&gt; bool:</span>
+    <span class="s4">&quot;&quot;&quot;Checks whether pkg was installed by pip 
+ 
+    This is used not to display the upgrade message when pip is in fact 
+    installed by system package manager, such as dnf on Fedora. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">dist = get_default_environment().get_distribution(pkg)</span>
+    <span class="s0">return </span><span class="s1">dist </span><span class="s0">is not None and </span><span class="s2">&quot;pip&quot; </span><span class="s1">== dist.installer</span>
+
+
+<span class="s0">def </span><span class="s1">_get_current_remote_pip_version(</span>
+    <span class="s1">session: PipSession</span><span class="s0">, </span><span class="s1">options: optparse.Values</span>
+<span class="s1">) -&gt; Optional[str]:</span>
+    <span class="s3"># Lets use PackageFinder to see what the latest pip version is</span>
+    <span class="s1">link_collector = LinkCollector.create(</span>
+        <span class="s1">session</span><span class="s0">,</span>
+        <span class="s1">options=options</span><span class="s0">,</span>
+        <span class="s1">suppress_no_index=</span><span class="s0">True,</span>
+    <span class="s1">)</span>
+
+    <span class="s3"># Pass allow_yanked=False so we don't suggest upgrading to a</span>
+    <span class="s3"># yanked version.</span>
+    <span class="s1">selection_prefs = SelectionPreferences(</span>
+        <span class="s1">allow_yanked=</span><span class="s0">False,</span>
+        <span class="s1">allow_all_prereleases=</span><span class="s0">False,  </span><span class="s3"># Explicitly set to False</span>
+    <span class="s1">)</span>
+
+    <span class="s1">finder = PackageFinder.create(</span>
+        <span class="s1">link_collector=link_collector</span><span class="s0">,</span>
+        <span class="s1">selection_prefs=selection_prefs</span><span class="s0">,</span>
+    <span class="s1">)</span>
+    <span class="s1">best_candidate = finder.find_best_candidate(</span><span class="s2">&quot;pip&quot;</span><span class="s1">).best_candidate</span>
+    <span class="s0">if </span><span class="s1">best_candidate </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">return </span><span class="s1">str(best_candidate.version)</span>
+
+
+<span class="s0">def </span><span class="s1">_self_version_check_logic(</span>
+    <span class="s1">*</span><span class="s0">,</span>
+    <span class="s1">state: SelfCheckState</span><span class="s0">,</span>
+    <span class="s1">current_time: datetime.datetime</span><span class="s0">,</span>
+    <span class="s1">local_version: DistributionVersion</span><span class="s0">,</span>
+    <span class="s1">get_remote_version: Callable[[]</span><span class="s0">, </span><span class="s1">Optional[str]]</span><span class="s0">,</span>
+<span class="s1">) -&gt; Optional[UpgradePrompt]:</span>
+    <span class="s1">remote_version_str = state.get(current_time)</span>
+    <span class="s0">if </span><span class="s1">remote_version_str </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s1">remote_version_str = get_remote_version()</span>
+        <span class="s0">if </span><span class="s1">remote_version_str </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">logger.debug(</span><span class="s2">&quot;No remote pip version found&quot;</span><span class="s1">)</span>
+            <span class="s0">return None</span>
+        <span class="s1">state.set(remote_version_str</span><span class="s0">, </span><span class="s1">current_time)</span>
+
+    <span class="s1">remote_version = parse_version(remote_version_str)</span>
+    <span class="s1">logger.debug(</span><span class="s2">&quot;Remote version of pip: %s&quot;</span><span class="s0">, </span><span class="s1">remote_version)</span>
+    <span class="s1">logger.debug(</span><span class="s2">&quot;Local version of pip:  %s&quot;</span><span class="s0">, </span><span class="s1">local_version)</span>
+
+    <span class="s1">pip_installed_by_pip = was_installed_by_pip(</span><span class="s2">&quot;pip&quot;</span><span class="s1">)</span>
+    <span class="s1">logger.debug(</span><span class="s2">&quot;Was pip installed by pip? %s&quot;</span><span class="s0">, </span><span class="s1">pip_installed_by_pip)</span>
+    <span class="s0">if not </span><span class="s1">pip_installed_by_pip:</span>
+        <span class="s0">return None  </span><span class="s3"># Only suggest upgrade if pip is installed by pip.</span>
+
+    <span class="s1">local_version_is_older = (</span>
+        <span class="s1">local_version &lt; remote_version</span>
+        <span class="s0">and </span><span class="s1">local_version.base_version != remote_version.base_version</span>
+    <span class="s1">)</span>
+    <span class="s0">if </span><span class="s1">local_version_is_older:</span>
+        <span class="s0">return </span><span class="s1">UpgradePrompt(old=str(local_version)</span><span class="s0">, </span><span class="s1">new=remote_version_str)</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">pip_self_version_check(session: PipSession</span><span class="s0">, </span><span class="s1">options: optparse.Values) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s4">&quot;&quot;&quot;Check for an update for pip. 
+ 
+    Limit the frequency of checks to once per week. State is stored either in 
+    the active virtualenv or in the user's USER_CACHE_DIR keyed off the prefix 
+    of the pip script path. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">installed_dist = get_default_environment().get_distribution(</span><span class="s2">&quot;pip&quot;</span><span class="s1">)</span>
+    <span class="s0">if not </span><span class="s1">installed_dist:</span>
+        <span class="s0">return</span>
+
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">upgrade_prompt = _self_version_check_logic(</span>
+            <span class="s1">state=SelfCheckState(cache_dir=options.cache_dir)</span><span class="s0">,</span>
+            <span class="s1">current_time=datetime.datetime.utcnow()</span><span class="s0">,</span>
+            <span class="s1">local_version=installed_dist.version</span><span class="s0">,</span>
+            <span class="s1">get_remote_version=functools.partial(</span>
+                <span class="s1">_get_current_remote_pip_version</span><span class="s0">, </span><span class="s1">session</span><span class="s0">, </span><span class="s1">options</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">upgrade_prompt </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">logger.warning(</span><span class="s2">&quot;[present-rich] %s&quot;</span><span class="s0">, </span><span class="s1">upgrade_prompt)</span>
+    <span class="s0">except </span><span class="s1">Exception:</span>
+        <span class="s1">logger.warning(</span><span class="s2">&quot;There was an error checking the latest version of pip.&quot;</span><span class="s1">)</span>
+        <span class="s1">logger.debug(</span><span class="s2">&quot;See below for error&quot;</span><span class="s0">, </span><span class="s1">exc_info=</span><span class="s0">True</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,395 @@
+<html>
+<head>
+<title>gthread.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6897bb;}
+.s4 { color: #6a8759;}
+.s5 { color: #629755; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+gthread.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s0"># design:</span>
+<span class="s0"># A threaded worker accepts connections in the main loop, accepted</span>
+<span class="s0"># connections are added to the thread pool as a connection job.</span>
+<span class="s0"># Keepalive connections are put back in the loop waiting for an event.</span>
+<span class="s0"># If no event happen after the keep alive timeout, the connection is</span>
+<span class="s0"># closed.</span>
+<span class="s0"># pylint: disable=no-else-break</span>
+
+<span class="s2">from </span><span class="s1">concurrent </span><span class="s2">import </span><span class="s1">futures</span>
+<span class="s2">import </span><span class="s1">errno</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">selectors</span>
+<span class="s2">import </span><span class="s1">socket</span>
+<span class="s2">import </span><span class="s1">ssl</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">time</span>
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">deque</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime</span>
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">partial</span>
+<span class="s2">from </span><span class="s1">threading </span><span class="s2">import </span><span class="s1">RLock</span>
+
+<span class="s2">from </span><span class="s1">. </span><span class="s2">import </span><span class="s1">base</span>
+<span class="s2">from </span><span class="s1">.. </span><span class="s2">import </span><span class="s1">http</span>
+<span class="s2">from </span><span class="s1">.. </span><span class="s2">import </span><span class="s1">util</span>
+<span class="s2">from </span><span class="s1">.. </span><span class="s2">import </span><span class="s1">sock</span>
+<span class="s2">from </span><span class="s1">..http </span><span class="s2">import </span><span class="s1">wsgi</span>
+
+
+<span class="s2">class </span><span class="s1">TConn(object):</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">cfg</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">server):</span>
+        <span class="s1">self.cfg = cfg</span>
+        <span class="s1">self.sock = sock</span>
+        <span class="s1">self.client = client</span>
+        <span class="s1">self.server = server</span>
+
+        <span class="s1">self.timeout = </span><span class="s2">None</span>
+        <span class="s1">self.parser = </span><span class="s2">None</span>
+        <span class="s1">self.initialized = </span><span class="s2">False</span>
+
+        <span class="s0"># set the socket to non blocking</span>
+        <span class="s1">self.sock.setblocking(</span><span class="s2">False</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">init(self):</span>
+        <span class="s1">self.initialized = </span><span class="s2">True</span>
+        <span class="s1">self.sock.setblocking(</span><span class="s2">True</span><span class="s1">)</span>
+
+        <span class="s2">if </span><span class="s1">self.parser </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s0"># wrap the socket if needed</span>
+            <span class="s2">if </span><span class="s1">self.cfg.is_ssl:</span>
+                <span class="s1">self.sock = sock.ssl_wrap_socket(self.sock</span><span class="s2">, </span><span class="s1">self.cfg)</span>
+
+            <span class="s0"># initialize the parser</span>
+            <span class="s1">self.parser = http.RequestParser(self.cfg</span><span class="s2">, </span><span class="s1">self.sock</span><span class="s2">, </span><span class="s1">self.client)</span>
+
+    <span class="s2">def </span><span class="s1">set_timeout(self):</span>
+        <span class="s0"># set the timeout</span>
+        <span class="s1">self.timeout = time.time() + self.cfg.keepalive</span>
+
+    <span class="s2">def </span><span class="s1">close(self):</span>
+        <span class="s1">util.close(self.sock)</span>
+
+
+<span class="s2">class </span><span class="s1">ThreadWorker(base.Worker):</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">*args</span><span class="s2">, </span><span class="s1">**kwargs):</span>
+        <span class="s1">super().__init__(*args</span><span class="s2">, </span><span class="s1">**kwargs)</span>
+        <span class="s1">self.worker_connections = self.cfg.worker_connections</span>
+        <span class="s1">self.max_keepalived = self.cfg.worker_connections - self.cfg.threads</span>
+        <span class="s0"># initialise the pool</span>
+        <span class="s1">self.tpool = </span><span class="s2">None</span>
+        <span class="s1">self.poller = </span><span class="s2">None</span>
+        <span class="s1">self._lock = </span><span class="s2">None</span>
+        <span class="s1">self.futures = deque()</span>
+        <span class="s1">self._keep = deque()</span>
+        <span class="s1">self.nr_conns = </span><span class="s3">0</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s2">def </span><span class="s1">check_config(cls</span><span class="s2">, </span><span class="s1">cfg</span><span class="s2">, </span><span class="s1">log):</span>
+        <span class="s1">max_keepalived = cfg.worker_connections - cfg.threads</span>
+
+        <span class="s2">if </span><span class="s1">max_keepalived &lt;= </span><span class="s3">0 </span><span class="s2">and </span><span class="s1">cfg.keepalive:</span>
+            <span class="s1">log.warning(</span><span class="s4">&quot;No keepalived connections can be handled. &quot; </span><span class="s1">+</span>
+                        <span class="s4">&quot;Check the number of worker connections and threads.&quot;</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">init_process(self):</span>
+        <span class="s1">self.tpool = self.get_thread_pool()</span>
+        <span class="s1">self.poller = selectors.DefaultSelector()</span>
+        <span class="s1">self._lock = RLock()</span>
+        <span class="s1">super().init_process()</span>
+
+    <span class="s2">def </span><span class="s1">get_thread_pool(self):</span>
+        <span class="s5">&quot;&quot;&quot;Override this method to customize how the thread pool is created&quot;&quot;&quot;</span>
+        <span class="s2">return </span><span class="s1">futures.ThreadPoolExecutor(max_workers=self.cfg.threads)</span>
+
+    <span class="s2">def </span><span class="s1">handle_quit(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">self.alive = </span><span class="s2">False</span>
+        <span class="s0"># worker_int callback</span>
+        <span class="s1">self.cfg.worker_int(self)</span>
+        <span class="s1">self.tpool.shutdown(</span><span class="s2">False</span><span class="s1">)</span>
+        <span class="s1">time.sleep(</span><span class="s3">0.1</span><span class="s1">)</span>
+        <span class="s1">sys.exit(</span><span class="s3">0</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">_wrap_future(self</span><span class="s2">, </span><span class="s1">fs</span><span class="s2">, </span><span class="s1">conn):</span>
+        <span class="s1">fs.conn = conn</span>
+        <span class="s1">self.futures.append(fs)</span>
+        <span class="s1">fs.add_done_callback(self.finish_request)</span>
+
+    <span class="s2">def </span><span class="s1">enqueue_req(self</span><span class="s2">, </span><span class="s1">conn):</span>
+        <span class="s1">conn.init()</span>
+        <span class="s0"># submit the connection to a worker</span>
+        <span class="s1">fs = self.tpool.submit(self.handle</span><span class="s2">, </span><span class="s1">conn)</span>
+        <span class="s1">self._wrap_future(fs</span><span class="s2">, </span><span class="s1">conn)</span>
+
+    <span class="s2">def </span><span class="s1">accept(self</span><span class="s2">, </span><span class="s1">server</span><span class="s2">, </span><span class="s1">listener):</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">sock</span><span class="s2">, </span><span class="s1">client = listener.accept()</span>
+            <span class="s0"># initialize the connection object</span>
+            <span class="s1">conn = TConn(self.cfg</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">server)</span>
+
+            <span class="s1">self.nr_conns += </span><span class="s3">1</span>
+            <span class="s0"># wait until socket is readable</span>
+            <span class="s2">with </span><span class="s1">self._lock:</span>
+                <span class="s1">self.poller.register(conn.sock</span><span class="s2">, </span><span class="s1">selectors.EVENT_READ</span><span class="s2">,</span>
+                                     <span class="s1">partial(self.on_client_socket_readable</span><span class="s2">, </span><span class="s1">conn))</span>
+        <span class="s2">except </span><span class="s1">EnvironmentError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">e.errno </span><span class="s2">not in </span><span class="s1">(errno.EAGAIN</span><span class="s2">, </span><span class="s1">errno.ECONNABORTED</span><span class="s2">,</span>
+                               <span class="s1">errno.EWOULDBLOCK):</span>
+                <span class="s2">raise</span>
+
+    <span class="s2">def </span><span class="s1">on_client_socket_readable(self</span><span class="s2">, </span><span class="s1">conn</span><span class="s2">, </span><span class="s1">client):</span>
+        <span class="s2">with </span><span class="s1">self._lock:</span>
+            <span class="s0"># unregister the client from the poller</span>
+            <span class="s1">self.poller.unregister(client)</span>
+
+            <span class="s2">if </span><span class="s1">conn.initialized:</span>
+                <span class="s0"># remove the connection from keepalive</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s1">self._keep.remove(conn)</span>
+                <span class="s2">except </span><span class="s1">ValueError:</span>
+                    <span class="s0"># race condition</span>
+                    <span class="s2">return</span>
+
+        <span class="s0"># submit the connection to a worker</span>
+        <span class="s1">self.enqueue_req(conn)</span>
+
+    <span class="s2">def </span><span class="s1">murder_keepalived(self):</span>
+        <span class="s1">now = time.time()</span>
+        <span class="s2">while True</span><span class="s1">:</span>
+            <span class="s2">with </span><span class="s1">self._lock:</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s0"># remove the connection from the queue</span>
+                    <span class="s1">conn = self._keep.popleft()</span>
+                <span class="s2">except </span><span class="s1">IndexError:</span>
+                    <span class="s2">break</span>
+
+            <span class="s1">delta = conn.timeout - now</span>
+            <span class="s2">if </span><span class="s1">delta &gt; </span><span class="s3">0</span><span class="s1">:</span>
+                <span class="s0"># add the connection back to the queue</span>
+                <span class="s2">with </span><span class="s1">self._lock:</span>
+                    <span class="s1">self._keep.appendleft(conn)</span>
+                <span class="s2">break</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">self.nr_conns -= </span><span class="s3">1</span>
+                <span class="s0"># remove the socket from the poller</span>
+                <span class="s2">with </span><span class="s1">self._lock:</span>
+                    <span class="s2">try</span><span class="s1">:</span>
+                        <span class="s1">self.poller.unregister(conn.sock)</span>
+                    <span class="s2">except </span><span class="s1">EnvironmentError </span><span class="s2">as </span><span class="s1">e:</span>
+                        <span class="s2">if </span><span class="s1">e.errno != errno.EBADF:</span>
+                            <span class="s2">raise</span>
+                    <span class="s2">except </span><span class="s1">KeyError:</span>
+                        <span class="s0"># already removed by the system, continue</span>
+                        <span class="s2">pass</span>
+                    <span class="s2">except </span><span class="s1">ValueError:</span>
+                        <span class="s0"># already removed by the system continue</span>
+                        <span class="s2">pass</span>
+
+                <span class="s0"># close the socket</span>
+                <span class="s1">conn.close()</span>
+
+    <span class="s2">def </span><span class="s1">is_parent_alive(self):</span>
+        <span class="s0"># If our parent changed then we shut down.</span>
+        <span class="s2">if </span><span class="s1">self.ppid != os.getppid():</span>
+            <span class="s1">self.log.info(</span><span class="s4">&quot;Parent changed, shutting down: %s&quot;</span><span class="s2">, </span><span class="s1">self)</span>
+            <span class="s2">return False</span>
+        <span class="s2">return True</span>
+
+    <span class="s2">def </span><span class="s1">run(self):</span>
+        <span class="s0"># init listeners, add them to the event loop</span>
+        <span class="s2">for </span><span class="s1">sock </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">sock.setblocking(</span><span class="s2">False</span><span class="s1">)</span>
+            <span class="s0"># a race condition during graceful shutdown may make the listener</span>
+            <span class="s0"># name unavailable in the request handler so capture it once here</span>
+            <span class="s1">server = sock.getsockname()</span>
+            <span class="s1">acceptor = partial(self.accept</span><span class="s2">, </span><span class="s1">server)</span>
+            <span class="s1">self.poller.register(sock</span><span class="s2">, </span><span class="s1">selectors.EVENT_READ</span><span class="s2">, </span><span class="s1">acceptor)</span>
+
+        <span class="s2">while </span><span class="s1">self.alive:</span>
+            <span class="s0"># notify the arbiter we are alive</span>
+            <span class="s1">self.notify()</span>
+
+            <span class="s0"># can we accept more connections?</span>
+            <span class="s2">if </span><span class="s1">self.nr_conns &lt; self.worker_connections:</span>
+                <span class="s0"># wait for an event</span>
+                <span class="s1">events = self.poller.select(</span><span class="s3">1.0</span><span class="s1">)</span>
+                <span class="s2">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">events:</span>
+                    <span class="s1">callback = key.data</span>
+                    <span class="s1">callback(key.fileobj)</span>
+
+                <span class="s0"># check (but do not wait) for finished requests</span>
+                <span class="s1">result = futures.wait(self.futures</span><span class="s2">, </span><span class="s1">timeout=</span><span class="s3">0</span><span class="s2">,</span>
+                                      <span class="s1">return_when=futures.FIRST_COMPLETED)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s0"># wait for a request to finish</span>
+                <span class="s1">result = futures.wait(self.futures</span><span class="s2">, </span><span class="s1">timeout=</span><span class="s3">1.0</span><span class="s2">,</span>
+                                      <span class="s1">return_when=futures.FIRST_COMPLETED)</span>
+
+            <span class="s0"># clean up finished requests</span>
+            <span class="s2">for </span><span class="s1">fut </span><span class="s2">in </span><span class="s1">result.done:</span>
+                <span class="s1">self.futures.remove(fut)</span>
+
+            <span class="s2">if not </span><span class="s1">self.is_parent_alive():</span>
+                <span class="s2">break</span>
+
+            <span class="s0"># handle keepalive timeouts</span>
+            <span class="s1">self.murder_keepalived()</span>
+
+        <span class="s1">self.tpool.shutdown(</span><span class="s2">False</span><span class="s1">)</span>
+        <span class="s1">self.poller.close()</span>
+
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">s.close()</span>
+
+        <span class="s1">futures.wait(self.futures</span><span class="s2">, </span><span class="s1">timeout=self.cfg.graceful_timeout)</span>
+
+    <span class="s2">def </span><span class="s1">finish_request(self</span><span class="s2">, </span><span class="s1">fs):</span>
+        <span class="s2">if </span><span class="s1">fs.cancelled():</span>
+            <span class="s1">self.nr_conns -= </span><span class="s3">1</span>
+            <span class="s1">fs.conn.close()</span>
+            <span class="s2">return</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">(keepalive</span><span class="s2">, </span><span class="s1">conn) = fs.result()</span>
+            <span class="s0"># if the connection should be kept alived add it</span>
+            <span class="s0"># to the eventloop and record it</span>
+            <span class="s2">if </span><span class="s1">keepalive </span><span class="s2">and </span><span class="s1">self.alive:</span>
+                <span class="s0"># flag the socket as non blocked</span>
+                <span class="s1">conn.sock.setblocking(</span><span class="s2">False</span><span class="s1">)</span>
+
+                <span class="s0"># register the connection</span>
+                <span class="s1">conn.set_timeout()</span>
+                <span class="s2">with </span><span class="s1">self._lock:</span>
+                    <span class="s1">self._keep.append(conn)</span>
+
+                    <span class="s0"># add the socket to the event loop</span>
+                    <span class="s1">self.poller.register(conn.sock</span><span class="s2">, </span><span class="s1">selectors.EVENT_READ</span><span class="s2">,</span>
+                                         <span class="s1">partial(self.on_client_socket_readable</span><span class="s2">, </span><span class="s1">conn))</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">self.nr_conns -= </span><span class="s3">1</span>
+                <span class="s1">conn.close()</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s0"># an exception happened, make sure to close the</span>
+            <span class="s0"># socket.</span>
+            <span class="s1">self.nr_conns -= </span><span class="s3">1</span>
+            <span class="s1">fs.conn.close()</span>
+
+    <span class="s2">def </span><span class="s1">handle(self</span><span class="s2">, </span><span class="s1">conn):</span>
+        <span class="s1">keepalive = </span><span class="s2">False</span>
+        <span class="s1">req = </span><span class="s2">None</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">req = next(conn.parser)</span>
+            <span class="s2">if not </span><span class="s1">req:</span>
+                <span class="s2">return </span><span class="s1">(</span><span class="s2">False, </span><span class="s1">conn)</span>
+
+            <span class="s0"># handle the request</span>
+            <span class="s1">keepalive = self.handle_request(req</span><span class="s2">, </span><span class="s1">conn)</span>
+            <span class="s2">if </span><span class="s1">keepalive:</span>
+                <span class="s2">return </span><span class="s1">(keepalive</span><span class="s2">, </span><span class="s1">conn)</span>
+        <span class="s2">except </span><span class="s1">http.errors.NoMoreData </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.log.debug(</span><span class="s4">&quot;Ignored premature client disconnection. %s&quot;</span><span class="s2">, </span><span class="s1">e)</span>
+
+        <span class="s2">except </span><span class="s1">StopIteration </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.log.debug(</span><span class="s4">&quot;Closing connection. %s&quot;</span><span class="s2">, </span><span class="s1">e)</span>
+        <span class="s2">except </span><span class="s1">ssl.SSLError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">e.args[</span><span class="s3">0</span><span class="s1">] == ssl.SSL_ERROR_EOF:</span>
+                <span class="s1">self.log.debug(</span><span class="s4">&quot;ssl connection closed&quot;</span><span class="s1">)</span>
+                <span class="s1">conn.sock.close()</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">self.log.debug(</span><span class="s4">&quot;Error processing SSL request.&quot;</span><span class="s1">)</span>
+                <span class="s1">self.handle_error(req</span><span class="s2">, </span><span class="s1">conn.sock</span><span class="s2">, </span><span class="s1">conn.client</span><span class="s2">, </span><span class="s1">e)</span>
+
+        <span class="s2">except </span><span class="s1">EnvironmentError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">e.errno </span><span class="s2">not in </span><span class="s1">(errno.EPIPE</span><span class="s2">, </span><span class="s1">errno.ECONNRESET</span><span class="s2">, </span><span class="s1">errno.ENOTCONN):</span>
+                <span class="s1">self.log.exception(</span><span class="s4">&quot;Socket error processing request.&quot;</span><span class="s1">)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s2">if </span><span class="s1">e.errno == errno.ECONNRESET:</span>
+                    <span class="s1">self.log.debug(</span><span class="s4">&quot;Ignoring connection reset&quot;</span><span class="s1">)</span>
+                <span class="s2">elif </span><span class="s1">e.errno == errno.ENOTCONN:</span>
+                    <span class="s1">self.log.debug(</span><span class="s4">&quot;Ignoring socket not connected&quot;</span><span class="s1">)</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s1">self.log.debug(</span><span class="s4">&quot;Ignoring connection epipe&quot;</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.handle_error(req</span><span class="s2">, </span><span class="s1">conn.sock</span><span class="s2">, </span><span class="s1">conn.client</span><span class="s2">, </span><span class="s1">e)</span>
+
+        <span class="s2">return </span><span class="s1">(</span><span class="s2">False, </span><span class="s1">conn)</span>
+
+    <span class="s2">def </span><span class="s1">handle_request(self</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">conn):</span>
+        <span class="s1">environ = {}</span>
+        <span class="s1">resp = </span><span class="s2">None</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">self.cfg.pre_request(self</span><span class="s2">, </span><span class="s1">req)</span>
+            <span class="s1">request_start = datetime.now()</span>
+            <span class="s1">resp</span><span class="s2">, </span><span class="s1">environ = wsgi.create(req</span><span class="s2">, </span><span class="s1">conn.sock</span><span class="s2">, </span><span class="s1">conn.client</span><span class="s2">,</span>
+                                        <span class="s1">conn.server</span><span class="s2">, </span><span class="s1">self.cfg)</span>
+            <span class="s1">environ[</span><span class="s4">&quot;wsgi.multithread&quot;</span><span class="s1">] = </span><span class="s2">True</span>
+            <span class="s1">self.nr += </span><span class="s3">1</span>
+            <span class="s2">if </span><span class="s1">self.nr &gt;= self.max_requests:</span>
+                <span class="s2">if </span><span class="s1">self.alive:</span>
+                    <span class="s1">self.log.info(</span><span class="s4">&quot;Autorestarting worker after current request.&quot;</span><span class="s1">)</span>
+                    <span class="s1">self.alive = </span><span class="s2">False</span>
+                <span class="s1">resp.force_close()</span>
+
+            <span class="s2">if not </span><span class="s1">self.alive </span><span class="s2">or not </span><span class="s1">self.cfg.keepalive:</span>
+                <span class="s1">resp.force_close()</span>
+            <span class="s2">elif </span><span class="s1">len(self._keep) &gt;= self.max_keepalived:</span>
+                <span class="s1">resp.force_close()</span>
+
+            <span class="s1">respiter = self.wsgi(environ</span><span class="s2">, </span><span class="s1">resp.start_response)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s2">if </span><span class="s1">isinstance(respiter</span><span class="s2">, </span><span class="s1">environ[</span><span class="s4">'wsgi.file_wrapper'</span><span class="s1">]):</span>
+                    <span class="s1">resp.write_file(respiter)</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s2">for </span><span class="s1">item </span><span class="s2">in </span><span class="s1">respiter:</span>
+                        <span class="s1">resp.write(item)</span>
+
+                <span class="s1">resp.close()</span>
+            <span class="s2">finally</span><span class="s1">:</span>
+                <span class="s1">request_time = datetime.now() - request_start</span>
+                <span class="s1">self.log.access(resp</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">environ</span><span class="s2">, </span><span class="s1">request_time)</span>
+                <span class="s2">if </span><span class="s1">hasattr(respiter</span><span class="s2">, </span><span class="s4">&quot;close&quot;</span><span class="s1">):</span>
+                    <span class="s1">respiter.close()</span>
+
+            <span class="s2">if </span><span class="s1">resp.should_close():</span>
+                <span class="s1">self.log.debug(</span><span class="s4">&quot;Closing connection.&quot;</span><span class="s1">)</span>
+                <span class="s2">return False</span>
+        <span class="s2">except </span><span class="s1">EnvironmentError:</span>
+            <span class="s0"># pass to next try-except level</span>
+            <span class="s1">util.reraise(*sys.exc_info())</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s2">if </span><span class="s1">resp </span><span class="s2">and </span><span class="s1">resp.headers_sent:</span>
+                <span class="s0"># If the requests have already been sent, we should close the</span>
+                <span class="s0"># connection to indicate the error.</span>
+                <span class="s1">self.log.exception(</span><span class="s4">&quot;Error handling request&quot;</span><span class="s1">)</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s1">conn.sock.shutdown(socket.SHUT_RDWR)</span>
+                    <span class="s1">conn.sock.close()</span>
+                <span class="s2">except </span><span class="s1">EnvironmentError:</span>
+                    <span class="s2">pass</span>
+                <span class="s2">raise </span><span class="s1">StopIteration()</span>
+            <span class="s2">raise</span>
+        <span class="s2">finally</span><span class="s1">:</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">self.cfg.post_request(self</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">environ</span><span class="s2">, </span><span class="s1">resp)</span>
+            <span class="s2">except </span><span class="s1">Exception:</span>
+                <span class="s1">self.log.exception(</span><span class="s4">&quot;Exception in post_request hook&quot;</span><span class="s1">)</span>
+
+        <span class="s2">return True</span>
+</pre>
+</body>
+</html>

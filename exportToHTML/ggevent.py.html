@@ -1,0 +1,212 @@
+<html>
+<head>
+<title>ggevent.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #629755; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+ggevent.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime</span>
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">partial</span>
+<span class="s2">import </span><span class="s1">time</span>
+
+<span class="s2">try</span><span class="s1">:</span>
+    <span class="s2">import </span><span class="s1">gevent</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+    <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;gevent worker requires gevent 1.4 or higher&quot;</span><span class="s1">)</span>
+<span class="s2">else</span><span class="s1">:</span>
+    <span class="s2">from </span><span class="s1">packaging.version </span><span class="s2">import </span><span class="s1">parse </span><span class="s2">as </span><span class="s1">parse_version</span>
+    <span class="s2">if </span><span class="s1">parse_version(gevent.__version__) &lt; parse_version(</span><span class="s3">'1.4'</span><span class="s1">):</span>
+        <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;gevent worker requires gevent 1.4 or higher&quot;</span><span class="s1">)</span>
+
+<span class="s2">from </span><span class="s1">gevent.pool </span><span class="s2">import </span><span class="s1">Pool</span>
+<span class="s2">from </span><span class="s1">gevent.server </span><span class="s2">import </span><span class="s1">StreamServer</span>
+<span class="s2">from </span><span class="s1">gevent </span><span class="s2">import </span><span class="s1">hub</span><span class="s2">, </span><span class="s1">monkey</span><span class="s2">, </span><span class="s1">socket</span><span class="s2">, </span><span class="s1">pywsgi</span>
+
+<span class="s2">import </span><span class="s1">gunicorn</span>
+<span class="s2">from </span><span class="s1">gunicorn.http.wsgi </span><span class="s2">import </span><span class="s1">base_environ</span>
+<span class="s2">from </span><span class="s1">gunicorn.sock </span><span class="s2">import </span><span class="s1">ssl_context</span>
+<span class="s2">from </span><span class="s1">gunicorn.workers.base_async </span><span class="s2">import </span><span class="s1">AsyncWorker</span>
+
+<span class="s1">VERSION = </span><span class="s3">&quot;gevent/%s gunicorn/%s&quot; </span><span class="s1">% (gevent.__version__</span><span class="s2">, </span><span class="s1">gunicorn.__version__)</span>
+
+
+<span class="s2">class </span><span class="s1">GeventWorker(AsyncWorker):</span>
+
+    <span class="s1">server_class = </span><span class="s2">None</span>
+    <span class="s1">wsgi_handler = </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">patch(self):</span>
+        <span class="s1">monkey.patch_all()</span>
+
+        <span class="s0"># patch sockets</span>
+        <span class="s1">sockets = []</span>
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">sockets.append(socket.socket(s.FAMILY</span><span class="s2">, </span><span class="s1">socket.SOCK_STREAM</span><span class="s2">,</span>
+                                         <span class="s1">fileno=s.sock.fileno()))</span>
+        <span class="s1">self.sockets = sockets</span>
+
+    <span class="s2">def </span><span class="s1">notify(self):</span>
+        <span class="s1">super().notify()</span>
+        <span class="s2">if </span><span class="s1">self.ppid != os.getppid():</span>
+            <span class="s1">self.log.info(</span><span class="s3">&quot;Parent changed, shutting down: %s&quot;</span><span class="s2">, </span><span class="s1">self)</span>
+            <span class="s1">sys.exit(</span><span class="s4">0</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">timeout_ctx(self):</span>
+        <span class="s2">return </span><span class="s1">gevent.Timeout(self.cfg.keepalive</span><span class="s2">, False</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">run(self):</span>
+        <span class="s1">servers = []</span>
+        <span class="s1">ssl_args = {}</span>
+
+        <span class="s2">if </span><span class="s1">self.cfg.is_ssl:</span>
+            <span class="s1">ssl_args = {</span><span class="s3">&quot;ssl_context&quot;</span><span class="s1">: ssl_context(self.cfg)}</span>
+
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">s.setblocking(</span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s1">pool = Pool(self.worker_connections)</span>
+            <span class="s2">if </span><span class="s1">self.server_class </span><span class="s2">is not None</span><span class="s1">:</span>
+                <span class="s1">environ = base_environ(self.cfg)</span>
+                <span class="s1">environ.update({</span>
+                    <span class="s3">&quot;wsgi.multithread&quot;</span><span class="s1">: </span><span class="s2">True,</span>
+                    <span class="s3">&quot;SERVER_SOFTWARE&quot;</span><span class="s1">: VERSION</span><span class="s2">,</span>
+                <span class="s1">})</span>
+                <span class="s1">server = self.server_class(</span>
+                    <span class="s1">s</span><span class="s2">, </span><span class="s1">application=self.wsgi</span><span class="s2">, </span><span class="s1">spawn=pool</span><span class="s2">, </span><span class="s1">log=self.log</span><span class="s2">,</span>
+                    <span class="s1">handler_class=self.wsgi_handler</span><span class="s2">, </span><span class="s1">environ=environ</span><span class="s2">,</span>
+                    <span class="s1">**ssl_args)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">hfun = partial(self.handle</span><span class="s2">, </span><span class="s1">s)</span>
+                <span class="s1">server = StreamServer(s</span><span class="s2">, </span><span class="s1">handle=hfun</span><span class="s2">, </span><span class="s1">spawn=pool</span><span class="s2">, </span><span class="s1">**ssl_args)</span>
+                <span class="s2">if </span><span class="s1">self.cfg.workers &gt; </span><span class="s4">1</span><span class="s1">:</span>
+                    <span class="s1">server.max_accept = </span><span class="s4">1</span>
+
+            <span class="s1">server.start()</span>
+            <span class="s1">servers.append(server)</span>
+
+        <span class="s2">while </span><span class="s1">self.alive:</span>
+            <span class="s1">self.notify()</span>
+            <span class="s1">gevent.sleep(</span><span class="s4">1.0</span><span class="s1">)</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s0"># Stop accepting requests</span>
+            <span class="s2">for </span><span class="s1">server </span><span class="s2">in </span><span class="s1">servers:</span>
+                <span class="s2">if </span><span class="s1">hasattr(server</span><span class="s2">, </span><span class="s3">'close'</span><span class="s1">):  </span><span class="s0"># gevent 1.0</span>
+                    <span class="s1">server.close()</span>
+                <span class="s2">if </span><span class="s1">hasattr(server</span><span class="s2">, </span><span class="s3">'kill'</span><span class="s1">):  </span><span class="s0"># gevent &lt; 1.0</span>
+                    <span class="s1">server.kill()</span>
+
+            <span class="s0"># Handle current requests until graceful_timeout</span>
+            <span class="s1">ts = time.time()</span>
+            <span class="s2">while </span><span class="s1">time.time() - ts &lt;= self.cfg.graceful_timeout:</span>
+                <span class="s1">accepting = </span><span class="s4">0</span>
+                <span class="s2">for </span><span class="s1">server </span><span class="s2">in </span><span class="s1">servers:</span>
+                    <span class="s2">if </span><span class="s1">server.pool.free_count() != server.pool.size:</span>
+                        <span class="s1">accepting += </span><span class="s4">1</span>
+
+                <span class="s0"># if no server is accepting a connection, we can exit</span>
+                <span class="s2">if not </span><span class="s1">accepting:</span>
+                    <span class="s2">return</span>
+
+                <span class="s1">self.notify()</span>
+                <span class="s1">gevent.sleep(</span><span class="s4">1.0</span><span class="s1">)</span>
+
+            <span class="s0"># Force kill all active the handlers</span>
+            <span class="s1">self.log.warning(</span><span class="s3">&quot;Worker graceful timeout (pid:%s)&quot;</span><span class="s2">, </span><span class="s1">self.pid)</span>
+            <span class="s2">for </span><span class="s1">server </span><span class="s2">in </span><span class="s1">servers:</span>
+                <span class="s1">server.stop(timeout=</span><span class="s4">1</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">handle(self</span><span class="s2">, </span><span class="s1">listener</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">addr):</span>
+        <span class="s0"># Connected socket timeout defaults to socket.getdefaulttimeout().</span>
+        <span class="s0"># This forces to blocking mode.</span>
+        <span class="s1">client.setblocking(</span><span class="s4">1</span><span class="s1">)</span>
+        <span class="s1">super().handle(listener</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">addr)</span>
+
+    <span class="s2">def </span><span class="s1">handle_request(self</span><span class="s2">, </span><span class="s1">listener_name</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">addr):</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">super().handle_request(listener_name</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">addr)</span>
+        <span class="s2">except </span><span class="s1">gevent.GreenletExit:</span>
+            <span class="s2">pass</span>
+        <span class="s2">except </span><span class="s1">SystemExit:</span>
+            <span class="s2">pass</span>
+
+    <span class="s2">def </span><span class="s1">handle_quit(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s0"># Move this out of the signal handler so we can use</span>
+        <span class="s0"># blocking calls. See #1126</span>
+        <span class="s1">gevent.spawn(super().handle_quit</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame)</span>
+
+    <span class="s2">def </span><span class="s1">handle_usr1(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s0"># Make the gevent workers handle the usr1 signal</span>
+        <span class="s0"># by deferring to a new greenlet. See #1645</span>
+        <span class="s1">gevent.spawn(super().handle_usr1</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame)</span>
+
+    <span class="s2">def </span><span class="s1">init_process(self):</span>
+        <span class="s1">self.patch()</span>
+        <span class="s1">hub.reinit()</span>
+        <span class="s1">super().init_process()</span>
+
+
+<span class="s2">class </span><span class="s1">GeventResponse(object):</span>
+
+    <span class="s1">status = </span><span class="s2">None</span>
+    <span class="s1">headers = </span><span class="s2">None</span>
+    <span class="s1">sent = </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">status</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">, </span><span class="s1">clength):</span>
+        <span class="s1">self.status = status</span>
+        <span class="s1">self.headers = headers</span>
+        <span class="s1">self.sent = clength</span>
+
+
+<span class="s2">class </span><span class="s1">PyWSGIHandler(pywsgi.WSGIHandler):</span>
+
+    <span class="s2">def </span><span class="s1">log_request(self):</span>
+        <span class="s1">start = datetime.fromtimestamp(self.time_start)</span>
+        <span class="s1">finish = datetime.fromtimestamp(self.time_finish)</span>
+        <span class="s1">response_time = finish - start</span>
+        <span class="s1">resp_headers = getattr(self</span><span class="s2">, </span><span class="s3">'response_headers'</span><span class="s2">, </span><span class="s1">{})</span>
+        <span class="s1">resp = GeventResponse(self.status</span><span class="s2">, </span><span class="s1">resp_headers</span><span class="s2">, </span><span class="s1">self.response_length)</span>
+        <span class="s2">if </span><span class="s1">hasattr(self</span><span class="s2">, </span><span class="s3">'headers'</span><span class="s1">):</span>
+            <span class="s1">req_headers = self.headers.items()</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">req_headers = []</span>
+        <span class="s1">self.server.log.access(resp</span><span class="s2">, </span><span class="s1">req_headers</span><span class="s2">, </span><span class="s1">self.environ</span><span class="s2">, </span><span class="s1">response_time)</span>
+
+    <span class="s2">def </span><span class="s1">get_environ(self):</span>
+        <span class="s1">env = super().get_environ()</span>
+        <span class="s1">env[</span><span class="s3">'gunicorn.sock'</span><span class="s1">] = self.socket</span>
+        <span class="s1">env[</span><span class="s3">'RAW_URI'</span><span class="s1">] = self.path</span>
+        <span class="s2">return </span><span class="s1">env</span>
+
+
+<span class="s2">class </span><span class="s1">PyWSGIServer(pywsgi.WSGIServer):</span>
+    <span class="s2">pass</span>
+
+
+<span class="s2">class </span><span class="s1">GeventPyWSGIWorker(GeventWorker):</span>
+    <span class="s5">&quot;The Gevent StreamServer based workers.&quot;</span>
+    <span class="s1">server_class = PyWSGIServer</span>
+    <span class="s1">wsgi_handler = PyWSGIHandler</span>
+</pre>
+</body>
+</html>

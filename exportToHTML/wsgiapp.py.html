@@ -1,0 +1,93 @@
+<html>
+<head>
+<title>wsgiapp.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #629755; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+wsgiapp.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+
+<span class="s2">from </span><span class="s1">gunicorn.errors </span><span class="s2">import </span><span class="s1">ConfigError</span>
+<span class="s2">from </span><span class="s1">gunicorn.app.base </span><span class="s2">import </span><span class="s1">Application</span>
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">util</span>
+
+
+<span class="s2">class </span><span class="s1">WSGIApplication(Application):</span>
+    <span class="s2">def </span><span class="s1">init(self</span><span class="s2">, </span><span class="s1">parser</span><span class="s2">, </span><span class="s1">opts</span><span class="s2">, </span><span class="s1">args):</span>
+        <span class="s1">self.app_uri = </span><span class="s2">None</span>
+
+        <span class="s2">if </span><span class="s1">opts.paste:</span>
+            <span class="s2">from </span><span class="s1">.pasterapp </span><span class="s2">import </span><span class="s1">has_logging_config</span>
+
+            <span class="s1">config_uri = os.path.abspath(opts.paste)</span>
+            <span class="s1">config_file = config_uri.split(</span><span class="s3">'#'</span><span class="s1">)[</span><span class="s4">0</span><span class="s1">]</span>
+
+            <span class="s2">if not </span><span class="s1">os.path.exists(config_file):</span>
+                <span class="s2">raise </span><span class="s1">ConfigError(</span><span class="s3">&quot;%r not found&quot; </span><span class="s1">% config_file)</span>
+
+            <span class="s1">self.cfg.set(</span><span class="s3">&quot;default_proc_name&quot;</span><span class="s2">, </span><span class="s1">config_file)</span>
+            <span class="s1">self.app_uri = config_uri</span>
+
+            <span class="s2">if </span><span class="s1">has_logging_config(config_file):</span>
+                <span class="s1">self.cfg.set(</span><span class="s3">&quot;logconfig&quot;</span><span class="s2">, </span><span class="s1">config_file)</span>
+
+            <span class="s2">return</span>
+
+        <span class="s2">if </span><span class="s1">len(args) &gt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">self.cfg.set(</span><span class="s3">&quot;default_proc_name&quot;</span><span class="s2">, </span><span class="s1">args[</span><span class="s4">0</span><span class="s1">])</span>
+            <span class="s1">self.app_uri = args[</span><span class="s4">0</span><span class="s1">]</span>
+
+    <span class="s2">def </span><span class="s1">load_config(self):</span>
+        <span class="s1">super().load_config()</span>
+
+        <span class="s2">if </span><span class="s1">self.app_uri </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">if </span><span class="s1">self.cfg.wsgi_app </span><span class="s2">is not None</span><span class="s1">:</span>
+                <span class="s1">self.app_uri = self.cfg.wsgi_app</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s2">raise </span><span class="s1">ConfigError(</span><span class="s3">&quot;No application module specified.&quot;</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">load_wsgiapp(self):</span>
+        <span class="s2">return </span><span class="s1">util.import_app(self.app_uri)</span>
+
+    <span class="s2">def </span><span class="s1">load_pasteapp(self):</span>
+        <span class="s2">from </span><span class="s1">.pasterapp </span><span class="s2">import </span><span class="s1">get_wsgi_app</span>
+        <span class="s2">return </span><span class="s1">get_wsgi_app(self.app_uri</span><span class="s2">, </span><span class="s1">defaults=self.cfg.paste_global_conf)</span>
+
+    <span class="s2">def </span><span class="s1">load(self):</span>
+        <span class="s2">if </span><span class="s1">self.cfg.paste </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">self.load_pasteapp()</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">self.load_wsgiapp()</span>
+
+
+<span class="s2">def </span><span class="s1">run():</span>
+    <span class="s5">&quot;&quot;&quot;\ 
+    The ``gunicorn`` command line runner for launching Gunicorn with 
+    generic WSGI applications. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">from </span><span class="s1">gunicorn.app.wsgiapp </span><span class="s2">import </span><span class="s1">WSGIApplication</span>
+    <span class="s1">WSGIApplication(</span><span class="s3">&quot;%(prog)s [OPTIONS] [APP_MODULE]&quot;</span><span class="s1">).run()</span>
+
+
+<span class="s2">if </span><span class="s1">__name__ == </span><span class="s3">'__main__'</span><span class="s1">:</span>
+    <span class="s1">run()</span>
+</pre>
+</body>
+</html>

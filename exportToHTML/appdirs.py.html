@@ -1,0 +1,73 @@
+<html>
+<head>
+<title>appdirs.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #629755; font-style: italic;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #808080;}
+.s4 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+appdirs.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot; 
+This code wraps the vendored appdirs module to so the return values are 
+compatible for the current pip code base. 
+ 
+The intention is to rewrite current usages gradually, keeping the tests pass, 
+and eventually drop this after all usages are changed. 
+&quot;&quot;&quot;</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">List</span>
+
+<span class="s2">from </span><span class="s1">pip._vendor </span><span class="s2">import </span><span class="s1">platformdirs </span><span class="s2">as </span><span class="s1">_appdirs</span>
+
+
+<span class="s2">def </span><span class="s1">user_cache_dir(appname: str) -&gt; str:</span>
+    <span class="s2">return </span><span class="s1">_appdirs.user_cache_dir(appname</span><span class="s2">, </span><span class="s1">appauthor=</span><span class="s2">False</span><span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">_macos_user_config_dir(appname: str</span><span class="s2">, </span><span class="s1">roaming: bool = </span><span class="s2">True</span><span class="s1">) -&gt; str:</span>
+    <span class="s3"># Use ~/Application Support/pip, if the directory exists.</span>
+    <span class="s1">path = _appdirs.user_data_dir(appname</span><span class="s2">, </span><span class="s1">appauthor=</span><span class="s2">False, </span><span class="s1">roaming=roaming)</span>
+    <span class="s2">if </span><span class="s1">os.path.isdir(path):</span>
+        <span class="s2">return </span><span class="s1">path</span>
+
+    <span class="s3"># Use a Linux-like ~/.config/pip, by default.</span>
+    <span class="s1">linux_like_path = </span><span class="s4">&quot;~/.config/&quot;</span>
+    <span class="s2">if </span><span class="s1">appname:</span>
+        <span class="s1">linux_like_path = os.path.join(linux_like_path</span><span class="s2">, </span><span class="s1">appname)</span>
+
+    <span class="s2">return </span><span class="s1">os.path.expanduser(linux_like_path)</span>
+
+
+<span class="s2">def </span><span class="s1">user_config_dir(appname: str</span><span class="s2">, </span><span class="s1">roaming: bool = </span><span class="s2">True</span><span class="s1">) -&gt; str:</span>
+    <span class="s2">if </span><span class="s1">sys.platform == </span><span class="s4">&quot;darwin&quot;</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">_macos_user_config_dir(appname</span><span class="s2">, </span><span class="s1">roaming)</span>
+
+    <span class="s2">return </span><span class="s1">_appdirs.user_config_dir(appname</span><span class="s2">, </span><span class="s1">appauthor=</span><span class="s2">False, </span><span class="s1">roaming=roaming)</span>
+
+
+<span class="s3"># for the discussion regarding site_config_dir locations</span>
+<span class="s3"># see &lt;https://github.com/pypa/pip/issues/1733&gt;</span>
+<span class="s2">def </span><span class="s1">site_config_dirs(appname: str) -&gt; List[str]:</span>
+    <span class="s2">if </span><span class="s1">sys.platform == </span><span class="s4">&quot;darwin&quot;</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">[_appdirs.site_data_dir(appname</span><span class="s2">, </span><span class="s1">appauthor=</span><span class="s2">False, </span><span class="s1">multipath=</span><span class="s2">True</span><span class="s1">)]</span>
+
+    <span class="s1">dirval = _appdirs.site_config_dir(appname</span><span class="s2">, </span><span class="s1">appauthor=</span><span class="s2">False, </span><span class="s1">multipath=</span><span class="s2">True</span><span class="s1">)</span>
+    <span class="s2">if </span><span class="s1">sys.platform == </span><span class="s4">&quot;win32&quot;</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">[dirval]</span>
+
+    <span class="s3"># Unix-y system. Look in /etc as well.</span>
+    <span class="s2">return </span><span class="s1">dirval.split(os.pathsep) + [</span><span class="s4">&quot;/etc&quot;</span><span class="s1">]</span>
+</pre>
+</body>
+</html>

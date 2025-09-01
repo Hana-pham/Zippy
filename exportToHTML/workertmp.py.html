@@ -1,0 +1,76 @@
+<html>
+<head>
+<title>workertmp.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+workertmp.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">platform</span>
+<span class="s2">import </span><span class="s1">tempfile</span>
+
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">util</span>
+
+<span class="s1">PLATFORM = platform.system()</span>
+<span class="s1">IS_CYGWIN = PLATFORM.startswith(</span><span class="s3">'CYGWIN'</span><span class="s1">)</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerTmp(object):</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">cfg):</span>
+        <span class="s1">old_umask = os.umask(cfg.umask)</span>
+        <span class="s1">fdir = cfg.worker_tmp_dir</span>
+        <span class="s2">if </span><span class="s1">fdir </span><span class="s2">and not </span><span class="s1">os.path.isdir(fdir):</span>
+            <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;%s doesn't exist. Can't create workertmp.&quot; </span><span class="s1">% fdir)</span>
+        <span class="s1">fd</span><span class="s2">, </span><span class="s1">name = tempfile.mkstemp(prefix=</span><span class="s3">&quot;wgunicorn-&quot;</span><span class="s2">, </span><span class="s1">dir=fdir)</span>
+        <span class="s1">os.umask(old_umask)</span>
+
+        <span class="s0"># change the owner and group of the file if the worker will run as</span>
+        <span class="s0"># a different user or group, so that the worker can modify the file</span>
+        <span class="s2">if </span><span class="s1">cfg.uid != os.geteuid() </span><span class="s2">or </span><span class="s1">cfg.gid != os.getegid():</span>
+            <span class="s1">util.chown(name</span><span class="s2">, </span><span class="s1">cfg.uid</span><span class="s2">, </span><span class="s1">cfg.gid)</span>
+
+        <span class="s0"># unlink the file so we don't leak temporary files</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s2">if not </span><span class="s1">IS_CYGWIN:</span>
+                <span class="s1">util.unlink(name)</span>
+            <span class="s0"># In Python 3.8, open() emits RuntimeWarning if buffering=1 for binary mode.</span>
+            <span class="s0"># Because we never write to this file, pass 0 to switch buffering off.</span>
+            <span class="s1">self._tmp = os.fdopen(fd</span><span class="s2">, </span><span class="s3">'w+b'</span><span class="s2">, </span><span class="s4">0</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s1">os.close(fd)</span>
+            <span class="s2">raise</span>
+
+        <span class="s1">self.spinner = </span><span class="s4">0</span>
+
+    <span class="s2">def </span><span class="s1">notify(self):</span>
+        <span class="s1">self.spinner = (self.spinner + </span><span class="s4">1</span><span class="s1">) % </span><span class="s4">2</span>
+        <span class="s1">os.fchmod(self._tmp.fileno()</span><span class="s2">, </span><span class="s1">self.spinner)</span>
+
+    <span class="s2">def </span><span class="s1">last_update(self):</span>
+        <span class="s2">return </span><span class="s1">os.fstat(self._tmp.fileno()).st_ctime</span>
+
+    <span class="s2">def </span><span class="s1">fileno(self):</span>
+        <span class="s2">return </span><span class="s1">self._tmp.fileno()</span>
+
+    <span class="s2">def </span><span class="s1">close(self):</span>
+        <span class="s2">return </span><span class="s1">self._tmp.close()</span>
+</pre>
+</body>
+</html>

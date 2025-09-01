@@ -1,0 +1,340 @@
+html, body {
+  font-family: 'Montserrat', sans-serif;
+  background-color: #f8f9fa;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+.part-button:hover {
+  background-color: #0056b3;
+}
+
+main {
+  flex: 1; /* This makes the main content area take up the remaining space */
+}
+
+/* Base styles */
+header {
+  margin-bottom: 3rem;
+  padding: 0 20px; /* Adjusted padding for better responsiveness */
+}
+
+.header-logo {
+  max-height: 40px;
+}
+
+.zippy-header {
+  font-family: 'Libre Baskerville', serif;
+  font-size: 3rem;
+  margin: 0;
+  /* Title */
+  font-family: 'Libre Baskerville';
+  letter-spacing: -7.5px;
+  color: #ED5D2A;
+  flex: none;
+  order: 1;
+  flex-grow: 0;
+}
+
+.header-subtext {
+  font-family: 'Montserrat', sans-serif; /* Changed font to Montserrat */
+  color: #555;
+  font-size: 1rem; /* Default size */
+  font-style: italic;
+}
+
+/* Media query for mobile devices */
+@media (max-width: 767.98px) {
+  .header-subtext {
+    font-size: 0.8rem; /* Smaller size for mobile */
+  }
+
+  .header-content {
+    padding: 0 10px; /* Less padding on mobile */
+  }
+
+  .zippy-header {
+    font-size: 2rem; /* Slightly smaller header font on mobile */
+  }
+}
+
+/* Additional spacing adjustments */
+.mt-5 {
+  margin-top: 3rem !important;
+}
+
+.mb-4 {
+  margin-bottom: 1.5rem !important;
+}
+
+.mb-5 {
+  margin-bottom: 3rem !important;
+}
+
+header h1 {
+  font-family: 'Libre Baskerville', serif;
+  color: #e94e1b;
+  font-size: 5rem;
+}
+
+main h2 {
+  font-family: 'Montserrat', sans-serif;
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-size: 2rem;
+}
+
+main h3 {
+  font-family: 'Montserrat', sans-serif;
+  color: #333;
+  margin-bottom: 3rem;
+  font-size: 1rem;
+}
+
+h2.font-weight-bold {
+  font-weight: 1200; /* Set the font weight to very bold */
+}
+
+main p {
+  font-family: 'Montserrat', sans-serif; /* Changed font to Montserrat */
+  color: #555;
+  line-height: 1.6;
+  margin-top: 1rem;
+}
+
+form .form-control {
+  max-width: 600px;
+  padding: 1.5rem;
+  font-size: 1rem;
+  border-radius: 5px;
+  border: 1px solid #ddd;
+}
+
+form .btn {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 5px;
+}
+
+/* Ensure the form elements stay next to each other */
+.form-row .col-md-9 {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.form-control {
+  margin-right: 10px; /* Add space between the input field and the button */
+}
+
+.logos-and-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 100px;
+}
+
+.logos-and-text p {
+  flex: 1;
+  min-width: 300px;
+  max-width: 600px;
+}
+
+.logos-and-text .logo {
+  margin: 0 1rem;
+}
+
+footer {
+  font-family: 'Montserrat', sans-serif; /* Changed font to Montserrat */
+  background-color: #343a40;
+  padding: 1rem 0;
+}
+
+footer p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+footer .social-icons {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+footer .social-icons a {
+  margin: 0 0.5rem;
+  color: white;
+}
+
+footer .social-icons img {
+  vertical-align: middle;
+}
+
+.footer-logo {
+  max-height: 40px;
+  margin-right: 10px; /* Add margin between logos */
+}
+
+.footer-logo2 {
+  max-height: 20px;
+  margin-right: 10px; /* Add margin between logos */
+}
+
+/* LOADING PAGE */
+
+.loader {
+  position: relative;
+  width: 100px;
+  height: 100px;
+}
+
+.block {
+  position: absolute;
+  width: 80px;
+  height: 30px;
+  border-radius: 20px;
+  opacity: 0.8;
+}
+
+.orange {
+  background-color: #ED5D2A;
+  animation: moveAndRotate 2s infinite linear;
+}
+
+.yellow {
+  background-color: #F6B03D;
+  animation: moveAndRotate 2s infinite linear;
+  animation-delay: 0.5s;
+}
+
+.blue {
+  background-color: #0F70AB;
+  animation: moveAndRotate 2s infinite linear;
+  animation-delay: 1s;
+}
+
+@keyframes moveAndRotate {
+  0%, 100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  33% {
+    transform: translate(-40px, -40px) rotate(120deg);
+  }
+  67% {
+    transform: translate(40px, -40px) rotate(240deg);
+  }
+}
+
+/* Increase size of the checkbox and its label */
+.checkbox-container input[type="checkbox"] {
+  transform: scale(2);
+  margin-right: 10px;
+}
+
+/* Adjust the position and alignment of the label */
+.checkbox-container label {
+  display: flex;
+  align-items: center;
+}
+
+.btn-container button {
+  margin-left: 10px;
+}
+
+.showsScreens .btn-container {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.showImage:hover, .seeElements:hover {
+  opacity: 0.8; /* Slightly darker on hover */
+}
+
+/* Style the show screens image */
+.showsScreens img.return_img {
+  width: 20px;
+  height: auto;
+  margin-right: 5px;
+}
+
+/* Screen Container  */
+table.dataTable th, table.dataTable td {
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+table.dataTable th:nth-child(1), table.dataTable td:nth-child(1) {
+  width: 70%;
+}
+
+table.dataTable th:nth-child(2), table.dataTable td:nth-child(2) {
+  width: 10%;
+}
+
+table.dataTable th:nth-child(3), table.dataTable td:nth-child(3) {
+  width: 10%;
+}
+
+table.dataTable th:nth-child(4), table.dataTable td:nth-child(4) {
+  width: 10%;
+}
+
+.thumbnail-cell {
+  text-align: center;
+  width: 70%;
+}
+
+.thumbnail-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.thumbnail {
+  max-width: 300px;
+  max-height: 400px;
+  display: block;
+}
+
+.thumbnail-name {
+  max-width: 600px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  text-align: center;
+}
+
+.checkbox-container, .btn-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+table {
+  width: 100% !important;
+  margin-top: 3rem;
+}
+
+@media (max-width: 767.98px) {
+  .thumbnail {
+    max-width: 100%;
+  }
+  
+  .img-fluid {
+    max-width: 100px; /* Adjust as necessary */
+    height: auto;
+}
+}

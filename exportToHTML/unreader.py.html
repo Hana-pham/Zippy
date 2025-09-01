@@ -1,0 +1,101 @@
+<html>
+<head>
+<title>unreader.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+unreader.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">os</span>
+
+<span class="s0"># Classes that can undo reading data from</span>
+<span class="s0"># a given type of data source.</span>
+
+
+<span class="s2">class </span><span class="s1">Unreader(object):</span>
+    <span class="s2">def </span><span class="s1">__init__(self):</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+
+    <span class="s2">def </span><span class="s1">chunk(self):</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError()</span>
+
+    <span class="s2">def </span><span class="s1">read(self</span><span class="s2">, </span><span class="s1">size=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is not None and not </span><span class="s1">isinstance(size</span><span class="s2">, </span><span class="s1">int):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;size parameter must be an int or long.&quot;</span><span class="s1">)</span>
+
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s2">if </span><span class="s1">size == </span><span class="s4">0</span><span class="s1">:</span>
+                <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+            <span class="s2">if </span><span class="s1">size &lt; </span><span class="s4">0</span><span class="s1">:</span>
+                <span class="s1">size = </span><span class="s2">None</span>
+
+        <span class="s1">self.buf.seek(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">os.SEEK_END)</span>
+
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is None and </span><span class="s1">self.buf.tell():</span>
+            <span class="s1">ret = self.buf.getvalue()</span>
+            <span class="s1">self.buf = io.BytesIO()</span>
+            <span class="s2">return </span><span class="s1">ret</span>
+        <span class="s2">if </span><span class="s1">size </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">d = self.chunk()</span>
+            <span class="s2">return </span><span class="s1">d</span>
+
+        <span class="s2">while </span><span class="s1">self.buf.tell() &lt; size:</span>
+            <span class="s1">chunk = self.chunk()</span>
+            <span class="s2">if not </span><span class="s1">chunk:</span>
+                <span class="s1">ret = self.buf.getvalue()</span>
+                <span class="s1">self.buf = io.BytesIO()</span>
+                <span class="s2">return </span><span class="s1">ret</span>
+            <span class="s1">self.buf.write(chunk)</span>
+        <span class="s1">data = self.buf.getvalue()</span>
+        <span class="s1">self.buf = io.BytesIO()</span>
+        <span class="s1">self.buf.write(data[size:])</span>
+        <span class="s2">return </span><span class="s1">data[:size]</span>
+
+    <span class="s2">def </span><span class="s1">unread(self</span><span class="s2">, </span><span class="s1">data):</span>
+        <span class="s1">self.buf.seek(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">os.SEEK_END)</span>
+        <span class="s1">self.buf.write(data)</span>
+
+
+<span class="s2">class </span><span class="s1">SocketUnreader(Unreader):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">max_chunk=</span><span class="s4">8192</span><span class="s1">):</span>
+        <span class="s1">super().__init__()</span>
+        <span class="s1">self.sock = sock</span>
+        <span class="s1">self.mxchunk = max_chunk</span>
+
+    <span class="s2">def </span><span class="s1">chunk(self):</span>
+        <span class="s2">return </span><span class="s1">self.sock.recv(self.mxchunk)</span>
+
+
+<span class="s2">class </span><span class="s1">IterUnreader(Unreader):</span>
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">iterable):</span>
+        <span class="s1">super().__init__()</span>
+        <span class="s1">self.iter = iter(iterable)</span>
+
+    <span class="s2">def </span><span class="s1">chunk(self):</span>
+        <span class="s2">if not </span><span class="s1">self.iter:</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">next(self.iter)</span>
+        <span class="s2">except </span><span class="s1">StopIteration:</span>
+            <span class="s1">self.iter = </span><span class="s2">None</span>
+            <span class="s2">return </span><span class="s5">b&quot;&quot;</span>
+</pre>
+</body>
+</html>

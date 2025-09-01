@@ -1,0 +1,118 @@
+<html>
+<head>
+<title>mixins.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #808080;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+mixins.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Callable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Hashable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Any</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">NoReturn</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">overload</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">SupportsIndex</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TypeVar</span>
+
+<span class="s0">from </span><span class="s1">_typeshed </span><span class="s0">import </span><span class="s1">SupportsKeysAndGetItem</span>
+
+<span class="s0">from </span><span class="s1">.headers </span><span class="s0">import </span><span class="s1">Headers</span>
+
+<span class="s1">K = TypeVar(</span><span class="s2">&quot;K&quot;</span><span class="s1">)</span>
+<span class="s1">T = TypeVar(</span><span class="s2">&quot;T&quot;</span><span class="s1">)</span>
+<span class="s1">V = TypeVar(</span><span class="s2">&quot;V&quot;</span><span class="s1">)</span>
+
+<span class="s0">def </span><span class="s1">is_immutable(self: object) -&gt; NoReturn: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableListMixin(list[V]):</span>
+    <span class="s1">_hash_cache: int | </span><span class="s0">None</span>
+    <span class="s0">def </span><span class="s1">__hash__(self) -&gt; int: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key: SupportsIndex | slice) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">__iadd__(self</span><span class="s0">, </span><span class="s1">other: Any) -&gt; NoReturn: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">__imul__(self</span><span class="s0">, </span><span class="s1">other: SupportsIndex) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key: int | slice</span><span class="s0">, </span><span class="s1">value: V) -&gt; NoReturn: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">append(self</span><span class="s0">, </span><span class="s1">value: V) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">remove(self</span><span class="s0">, </span><span class="s1">value: V) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">extend(self</span><span class="s0">, </span><span class="s1">values: Iterable[V]) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">insert(self</span><span class="s0">, </span><span class="s1">pos: SupportsIndex</span><span class="s0">, </span><span class="s1">value: V) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">index: SupportsIndex = -</span><span class="s4">1</span><span class="s1">) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">reverse(self) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">sort(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">key: Callable[[V]</span><span class="s0">, </span><span class="s1">Any] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None, </span><span class="s1">reverse: bool = </span><span class="s0">False</span>
+    <span class="s1">) -&gt; NoReturn: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableDictMixin(dict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s1">_hash_cache: int | </span><span class="s0">None</span>
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">fromkeys(  </span><span class="s3"># type: ignore</span>
+        <span class="s1">cls</span><span class="s0">, </span><span class="s1">keys: Iterable[K]</span><span class="s0">, </span><span class="s1">value: V | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; ImmutableDictMixin[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s0">def </span><span class="s1">_iter_hashitems(self) -&gt; Iterable[Hashable]: ...</span>
+    <span class="s0">def </span><span class="s1">__hash__(self) -&gt; int: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span><span class="s1">) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">*args: Any</span><span class="s0">, </span><span class="s1">**kwargs: V) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span><span class="s1">) -&gt; NoReturn: ...  </span><span class="s3"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">popitem(self) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">clear(self) -&gt; NoReturn: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableMultiDictMixin(ImmutableDictMixin[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s0">def </span><span class="s1">_iter_hashitems(self) -&gt; Iterable[Hashable]: ...</span>
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">popitemlist(self) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">poplist(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">setlist(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">new_list: Iterable[V]) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">setlistdefault(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default_list: Iterable[V] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; NoReturn: ...</span>
+
+<span class="s0">class </span><span class="s1">ImmutableHeadersMixin(Headers):</span>
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key: Any</span><span class="s0">, </span><span class="s1">_index_operation: bool = </span><span class="s0">True</span><span class="s1">) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key: Any</span><span class="s0">, </span><span class="s1">value: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">set(self</span><span class="s0">, </span><span class="s1">_key: Any</span><span class="s0">, </span><span class="s1">_value: Any</span><span class="s0">, </span><span class="s1">**kw: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">setlist(self</span><span class="s0">, </span><span class="s1">key: Any</span><span class="s0">, </span><span class="s1">values: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">add(self</span><span class="s0">, </span><span class="s1">_key: Any</span><span class="s0">, </span><span class="s1">_value: Any</span><span class="s0">, </span><span class="s1">**kw: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">add_header(self</span><span class="s0">, </span><span class="s1">_key: Any</span><span class="s0">, </span><span class="s1">_value: Any</span><span class="s0">, </span><span class="s1">**_kw: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">remove(self</span><span class="s0">, </span><span class="s1">key: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">extend(self</span><span class="s0">, </span><span class="s1">*args: Any</span><span class="s0">, </span><span class="s1">**kwargs: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">*args: Any</span><span class="s0">, </span><span class="s1">**kwargs: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">insert(self</span><span class="s0">, </span><span class="s1">pos: Any</span><span class="s0">, </span><span class="s1">value: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: Any = </span><span class="s0">None, </span><span class="s1">default: Any = ...) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">popitem(self) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key: Any</span><span class="s0">, </span><span class="s1">default: Any) -&gt; NoReturn: ...</span>
+    <span class="s0">def </span><span class="s1">setlistdefault(self</span><span class="s0">, </span><span class="s1">key: Any</span><span class="s0">, </span><span class="s1">default: Any) -&gt; NoReturn: ...</span>
+
+<span class="s0">def </span><span class="s1">_calls_update(name: str) -&gt; Callable[[UpdateDictMixin[K</span><span class="s0">, </span><span class="s1">V]]</span><span class="s0">, </span><span class="s1">Any]: ...</span>
+
+<span class="s0">class </span><span class="s1">UpdateDictMixin(dict[K</span><span class="s0">, </span><span class="s1">V]):</span>
+    <span class="s1">on_update: Callable[[UpdateDictMixin[K</span><span class="s0">, </span><span class="s1">V] | </span><span class="s0">None, None</span><span class="s1">]</span><span class="s0">, None</span><span class="s1">]</span>
+    <span class="s0">def </span><span class="s1">setdefault(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span><span class="s1">) -&gt; V: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; V: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">pop(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">default: V | T = ...) -&gt; V | T: ...</span>
+    <span class="s0">def </span><span class="s1">__setitem__(self</span><span class="s0">, </span><span class="s1">key: K</span><span class="s0">, </span><span class="s1">value: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__delitem__(self</span><span class="s0">, </span><span class="s1">key: K) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">clear(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">popitem(self) -&gt; tuple[K</span><span class="s0">, </span><span class="s1">V]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">__m: SupportsKeysAndGetItem[K</span><span class="s0">, </span><span class="s1">V]</span><span class="s0">, </span><span class="s1">**kwargs: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">__m: Iterable[tuple[K</span><span class="s0">, </span><span class="s1">V]]</span><span class="s0">, </span><span class="s1">**kwargs: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">update(self</span><span class="s0">, </span><span class="s1">**kwargs: V) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+</pre>
+</body>
+</html>

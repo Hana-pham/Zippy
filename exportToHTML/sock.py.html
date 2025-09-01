@@ -1,0 +1,254 @@
+<html>
+<head>
+<title>sock.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #629755; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+sock.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">errno</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">socket</span>
+<span class="s2">import </span><span class="s1">ssl</span>
+<span class="s2">import </span><span class="s1">stat</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">time</span>
+
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">util</span>
+
+
+<span class="s2">class </span><span class="s1">BaseSocket(object):</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">address</span><span class="s2">, </span><span class="s1">conf</span><span class="s2">, </span><span class="s1">log</span><span class="s2">, </span><span class="s1">fd=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">self.log = log</span>
+        <span class="s1">self.conf = conf</span>
+
+        <span class="s1">self.cfg_addr = address</span>
+        <span class="s2">if </span><span class="s1">fd </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">sock = socket.socket(self.FAMILY</span><span class="s2">, </span><span class="s1">socket.SOCK_STREAM)</span>
+            <span class="s1">bound = </span><span class="s2">False</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">sock = socket.fromfd(fd</span><span class="s2">, </span><span class="s1">self.FAMILY</span><span class="s2">, </span><span class="s1">socket.SOCK_STREAM)</span>
+            <span class="s1">os.close(fd)</span>
+            <span class="s1">bound = </span><span class="s2">True</span>
+
+        <span class="s1">self.sock = self.set_options(sock</span><span class="s2">, </span><span class="s1">bound=bound)</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;&lt;socket %d&gt;&quot; </span><span class="s1">% self.sock.fileno()</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__(self</span><span class="s2">, </span><span class="s1">name):</span>
+        <span class="s2">return </span><span class="s1">getattr(self.sock</span><span class="s2">, </span><span class="s1">name)</span>
+
+    <span class="s2">def </span><span class="s1">set_options(self</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">bound=</span><span class="s2">False</span><span class="s1">):</span>
+        <span class="s1">sock.setsockopt(socket.SOL_SOCKET</span><span class="s2">, </span><span class="s1">socket.SO_REUSEADDR</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+        <span class="s2">if </span><span class="s1">(self.conf.reuse_port</span>
+                <span class="s2">and </span><span class="s1">hasattr(socket</span><span class="s2">, </span><span class="s3">'SO_REUSEPORT'</span><span class="s1">)):  </span><span class="s0"># pragma: no cover</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">sock.setsockopt(socket.SOL_SOCKET</span><span class="s2">, </span><span class="s1">socket.SO_REUSEPORT</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s2">except </span><span class="s1">socket.error </span><span class="s2">as </span><span class="s1">err:</span>
+                <span class="s2">if </span><span class="s1">err.errno </span><span class="s2">not in </span><span class="s1">(errno.ENOPROTOOPT</span><span class="s2">, </span><span class="s1">errno.EINVAL):</span>
+                    <span class="s2">raise</span>
+        <span class="s2">if not </span><span class="s1">bound:</span>
+            <span class="s1">self.bind(sock)</span>
+        <span class="s1">sock.setblocking(</span><span class="s4">0</span><span class="s1">)</span>
+
+        <span class="s0"># make sure that the socket can be inherited</span>
+        <span class="s2">if </span><span class="s1">hasattr(sock</span><span class="s2">, </span><span class="s3">&quot;set_inheritable&quot;</span><span class="s1">):</span>
+            <span class="s1">sock.set_inheritable(</span><span class="s2">True</span><span class="s1">)</span>
+
+        <span class="s1">sock.listen(self.conf.backlog)</span>
+        <span class="s2">return </span><span class="s1">sock</span>
+
+    <span class="s2">def </span><span class="s1">bind(self</span><span class="s2">, </span><span class="s1">sock):</span>
+        <span class="s1">sock.bind(self.cfg_addr)</span>
+
+    <span class="s2">def </span><span class="s1">close(self):</span>
+        <span class="s2">if </span><span class="s1">self.sock </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">return</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">self.sock.close()</span>
+        <span class="s2">except </span><span class="s1">socket.error </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.log.info(</span><span class="s3">&quot;Error while closing socket %s&quot;</span><span class="s2">, </span><span class="s1">str(e))</span>
+
+        <span class="s1">self.sock = </span><span class="s2">None</span>
+
+
+<span class="s2">class </span><span class="s1">TCPSocket(BaseSocket):</span>
+
+    <span class="s1">FAMILY = socket.AF_INET</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">if </span><span class="s1">self.conf.is_ssl:</span>
+            <span class="s1">scheme = </span><span class="s3">&quot;https&quot;</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">scheme = </span><span class="s3">&quot;http&quot;</span>
+
+        <span class="s1">addr = self.sock.getsockname()</span>
+        <span class="s2">return </span><span class="s3">&quot;%s://%s:%d&quot; </span><span class="s1">% (scheme</span><span class="s2">, </span><span class="s1">addr[</span><span class="s4">0</span><span class="s1">]</span><span class="s2">, </span><span class="s1">addr[</span><span class="s4">1</span><span class="s1">])</span>
+
+    <span class="s2">def </span><span class="s1">set_options(self</span><span class="s2">, </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">bound=</span><span class="s2">False</span><span class="s1">):</span>
+        <span class="s1">sock.setsockopt(socket.IPPROTO_TCP</span><span class="s2">, </span><span class="s1">socket.TCP_NODELAY</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+        <span class="s2">return </span><span class="s1">super().set_options(sock</span><span class="s2">, </span><span class="s1">bound=bound)</span>
+
+
+<span class="s2">class </span><span class="s1">TCP6Socket(TCPSocket):</span>
+
+    <span class="s1">FAMILY = socket.AF_INET6</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s1">(host</span><span class="s2">, </span><span class="s1">port</span><span class="s2">, </span><span class="s1">_</span><span class="s2">, </span><span class="s1">_) = self.sock.getsockname()</span>
+        <span class="s2">return </span><span class="s3">&quot;http://[%s]:%d&quot; </span><span class="s1">% (host</span><span class="s2">, </span><span class="s1">port)</span>
+
+
+<span class="s2">class </span><span class="s1">UnixSocket(BaseSocket):</span>
+
+    <span class="s1">FAMILY = socket.AF_UNIX</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">addr</span><span class="s2">, </span><span class="s1">conf</span><span class="s2">, </span><span class="s1">log</span><span class="s2">, </span><span class="s1">fd=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s2">if </span><span class="s1">fd </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">st = os.stat(addr)</span>
+            <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">e:</span>
+                <span class="s2">if </span><span class="s1">e.args[</span><span class="s4">0</span><span class="s1">] != errno.ENOENT:</span>
+                    <span class="s2">raise</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s2">if </span><span class="s1">stat.S_ISSOCK(st.st_mode):</span>
+                    <span class="s1">os.remove(addr)</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;%r is not a socket&quot; </span><span class="s1">% addr)</span>
+        <span class="s1">super().__init__(addr</span><span class="s2">, </span><span class="s1">conf</span><span class="s2">, </span><span class="s1">log</span><span class="s2">, </span><span class="s1">fd=fd)</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;unix:%s&quot; </span><span class="s1">% self.cfg_addr</span>
+
+    <span class="s2">def </span><span class="s1">bind(self</span><span class="s2">, </span><span class="s1">sock):</span>
+        <span class="s1">old_umask = os.umask(self.conf.umask)</span>
+        <span class="s1">sock.bind(self.cfg_addr)</span>
+        <span class="s1">util.chown(self.cfg_addr</span><span class="s2">, </span><span class="s1">self.conf.uid</span><span class="s2">, </span><span class="s1">self.conf.gid)</span>
+        <span class="s1">os.umask(old_umask)</span>
+
+
+<span class="s2">def </span><span class="s1">_sock_type(addr):</span>
+    <span class="s2">if </span><span class="s1">isinstance(addr</span><span class="s2">, </span><span class="s1">tuple):</span>
+        <span class="s2">if </span><span class="s1">util.is_ipv6(addr[</span><span class="s4">0</span><span class="s1">]):</span>
+            <span class="s1">sock_type = TCP6Socket</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">sock_type = TCPSocket</span>
+    <span class="s2">elif </span><span class="s1">isinstance(addr</span><span class="s2">, </span><span class="s1">(str</span><span class="s2">, </span><span class="s1">bytes)):</span>
+        <span class="s1">sock_type = UnixSocket</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Unable to create socket from: %r&quot; </span><span class="s1">% addr)</span>
+    <span class="s2">return </span><span class="s1">sock_type</span>
+
+
+<span class="s2">def </span><span class="s1">create_sockets(conf</span><span class="s2">, </span><span class="s1">log</span><span class="s2">, </span><span class="s1">fds=</span><span class="s2">None</span><span class="s1">):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Create a new socket for the configured addresses or file descriptors. 
+ 
+    If a configured address is a tuple then a TCP socket is created. 
+    If it is a string, a Unix socket is created. Otherwise, a TypeError is 
+    raised. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">listeners = []</span>
+
+    <span class="s0"># get it only once</span>
+    <span class="s1">addr = conf.address</span>
+    <span class="s1">fdaddr = [bind </span><span class="s2">for </span><span class="s1">bind </span><span class="s2">in </span><span class="s1">addr </span><span class="s2">if </span><span class="s1">isinstance(bind</span><span class="s2">, </span><span class="s1">int)]</span>
+    <span class="s2">if </span><span class="s1">fds:</span>
+        <span class="s1">fdaddr += list(fds)</span>
+    <span class="s1">laddr = [bind </span><span class="s2">for </span><span class="s1">bind </span><span class="s2">in </span><span class="s1">addr </span><span class="s2">if not </span><span class="s1">isinstance(bind</span><span class="s2">, </span><span class="s1">int)]</span>
+
+    <span class="s0"># check ssl config early to raise the error on startup</span>
+    <span class="s0"># only the certfile is needed since it can contains the keyfile</span>
+    <span class="s2">if </span><span class="s1">conf.certfile </span><span class="s2">and not </span><span class="s1">os.path.exists(conf.certfile):</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">'certfile &quot;%s&quot; does not exist' </span><span class="s1">% conf.certfile)</span>
+
+    <span class="s2">if </span><span class="s1">conf.keyfile </span><span class="s2">and not </span><span class="s1">os.path.exists(conf.keyfile):</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">'keyfile &quot;%s&quot; does not exist' </span><span class="s1">% conf.keyfile)</span>
+
+    <span class="s0"># sockets are already bound</span>
+    <span class="s2">if </span><span class="s1">fdaddr:</span>
+        <span class="s2">for </span><span class="s1">fd </span><span class="s2">in </span><span class="s1">fdaddr:</span>
+            <span class="s1">sock = socket.fromfd(fd</span><span class="s2">, </span><span class="s1">socket.AF_UNIX</span><span class="s2">, </span><span class="s1">socket.SOCK_STREAM)</span>
+            <span class="s1">sock_name = sock.getsockname()</span>
+            <span class="s1">sock_type = _sock_type(sock_name)</span>
+            <span class="s1">listener = sock_type(sock_name</span><span class="s2">, </span><span class="s1">conf</span><span class="s2">, </span><span class="s1">log</span><span class="s2">, </span><span class="s1">fd=fd)</span>
+            <span class="s1">listeners.append(listener)</span>
+
+        <span class="s2">return </span><span class="s1">listeners</span>
+
+    <span class="s0"># no sockets is bound, first initialization of gunicorn in this env.</span>
+    <span class="s2">for </span><span class="s1">addr </span><span class="s2">in </span><span class="s1">laddr:</span>
+        <span class="s1">sock_type = _sock_type(addr)</span>
+        <span class="s1">sock = </span><span class="s2">None</span>
+        <span class="s2">for </span><span class="s1">i </span><span class="s2">in </span><span class="s1">range(</span><span class="s4">5</span><span class="s1">):</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">sock = sock_type(addr</span><span class="s2">, </span><span class="s1">conf</span><span class="s2">, </span><span class="s1">log)</span>
+            <span class="s2">except </span><span class="s1">socket.error </span><span class="s2">as </span><span class="s1">e:</span>
+                <span class="s2">if </span><span class="s1">e.args[</span><span class="s4">0</span><span class="s1">] == errno.EADDRINUSE:</span>
+                    <span class="s1">log.error(</span><span class="s3">&quot;Connection in use: %s&quot;</span><span class="s2">, </span><span class="s1">str(addr))</span>
+                <span class="s2">if </span><span class="s1">e.args[</span><span class="s4">0</span><span class="s1">] == errno.EADDRNOTAVAIL:</span>
+                    <span class="s1">log.error(</span><span class="s3">&quot;Invalid address: %s&quot;</span><span class="s2">, </span><span class="s1">str(addr))</span>
+                <span class="s2">if </span><span class="s1">i &lt; </span><span class="s4">5</span><span class="s1">:</span>
+                    <span class="s1">msg = </span><span class="s3">&quot;connection to {addr} failed: {error}&quot;</span>
+                    <span class="s1">log.debug(msg.format(addr=str(addr)</span><span class="s2">, </span><span class="s1">error=str(e)))</span>
+                    <span class="s1">log.error(</span><span class="s3">&quot;Retrying in 1 second.&quot;</span><span class="s1">)</span>
+                    <span class="s1">time.sleep(</span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s2">break</span>
+
+        <span class="s2">if </span><span class="s1">sock </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">log.error(</span><span class="s3">&quot;Can't connect to %s&quot;</span><span class="s2">, </span><span class="s1">str(addr))</span>
+            <span class="s1">sys.exit(</span><span class="s4">1</span><span class="s1">)</span>
+
+        <span class="s1">listeners.append(sock)</span>
+
+    <span class="s2">return </span><span class="s1">listeners</span>
+
+
+<span class="s2">def </span><span class="s1">close_sockets(listeners</span><span class="s2">, </span><span class="s1">unlink=</span><span class="s2">True</span><span class="s1">):</span>
+    <span class="s2">for </span><span class="s1">sock </span><span class="s2">in </span><span class="s1">listeners:</span>
+        <span class="s1">sock_name = sock.getsockname()</span>
+        <span class="s1">sock.close()</span>
+        <span class="s2">if </span><span class="s1">unlink </span><span class="s2">and </span><span class="s1">_sock_type(sock_name) </span><span class="s2">is </span><span class="s1">UnixSocket:</span>
+            <span class="s1">os.unlink(sock_name)</span>
+
+
+<span class="s2">def </span><span class="s1">ssl_context(conf):</span>
+    <span class="s2">def </span><span class="s1">default_ssl_context_factory():</span>
+        <span class="s1">context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH</span><span class="s2">, </span><span class="s1">cafile=conf.ca_certs)</span>
+        <span class="s1">context.load_cert_chain(certfile=conf.certfile</span><span class="s2">, </span><span class="s1">keyfile=conf.keyfile)</span>
+        <span class="s1">context.verify_mode = conf.cert_reqs</span>
+        <span class="s2">if </span><span class="s1">conf.ciphers:</span>
+            <span class="s1">context.set_ciphers(conf.ciphers)</span>
+        <span class="s2">return </span><span class="s1">context</span>
+
+    <span class="s2">return </span><span class="s1">conf.ssl_context(conf</span><span class="s2">, </span><span class="s1">default_ssl_context_factory)</span>
+
+
+<span class="s2">def </span><span class="s1">ssl_wrap_socket(sock</span><span class="s2">, </span><span class="s1">conf):</span>
+    <span class="s2">return </span><span class="s1">ssl_context(conf).wrap_socket(sock</span><span class="s2">,</span>
+                                         <span class="s1">server_side=</span><span class="s2">True,</span>
+                                         <span class="s1">suppress_ragged_eofs=conf.suppress_ragged_eofs</span><span class="s2">,</span>
+                                         <span class="s1">do_handshake_on_connect=conf.do_handshake_on_connect)</span>
+</pre>
+</body>
+</html>

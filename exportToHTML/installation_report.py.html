@@ -1,0 +1,73 @@
+<html>
+<head>
+<title>installation_report.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+installation_report.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Any</span><span class="s0">, </span><span class="s1">Dict</span><span class="s0">, </span><span class="s1">Sequence</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.packaging.markers </span><span class="s0">import </span><span class="s1">default_environment</span>
+
+<span class="s0">from </span><span class="s1">pip </span><span class="s0">import </span><span class="s1">__version__</span>
+<span class="s0">from </span><span class="s1">pip._internal.req.req_install </span><span class="s0">import </span><span class="s1">InstallRequirement</span>
+
+
+<span class="s0">class </span><span class="s1">InstallationReport:</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">install_requirements: Sequence[InstallRequirement]):</span>
+        <span class="s1">self._install_requirements = install_requirements</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">_install_req_to_dict(cls</span><span class="s0">, </span><span class="s1">ireq: InstallRequirement) -&gt; Dict[str</span><span class="s0">, </span><span class="s1">Any]:</span>
+        <span class="s0">assert </span><span class="s1">ireq.download_info</span><span class="s0">, </span><span class="s2">f&quot;No download_info for </span><span class="s0">{</span><span class="s1">ireq</span><span class="s0">}</span><span class="s2">&quot;</span>
+        <span class="s1">res = {</span>
+            <span class="s3"># PEP 610 json for the download URL. download_info.archive_info.hashes may</span>
+            <span class="s3"># be absent when the requirement was installed from the wheel cache</span>
+            <span class="s3"># and the cache entry was populated by an older pip version that did not</span>
+            <span class="s3"># record origin.json.</span>
+            <span class="s2">&quot;download_info&quot;</span><span class="s1">: ireq.download_info.to_dict()</span><span class="s0">,</span>
+            <span class="s3"># is_direct is true if the requirement was a direct URL reference (which</span>
+            <span class="s3"># includes editable requirements), and false if the requirement was</span>
+            <span class="s3"># downloaded from a PEP 503 index or --find-links.</span>
+            <span class="s2">&quot;is_direct&quot;</span><span class="s1">: ireq.is_direct</span><span class="s0">,</span>
+            <span class="s3"># requested is true if the requirement was specified by the user (aka</span>
+            <span class="s3"># top level requirement), and false if it was installed as a dependency of a</span>
+            <span class="s3"># requirement. https://peps.python.org/pep-0376/#requested</span>
+            <span class="s2">&quot;requested&quot;</span><span class="s1">: ireq.user_supplied</span><span class="s0">,</span>
+            <span class="s3"># PEP 566 json encoding for metadata</span>
+            <span class="s3"># https://www.python.org/dev/peps/pep-0566/#json-compatible-metadata</span>
+            <span class="s2">&quot;metadata&quot;</span><span class="s1">: ireq.get_dist().metadata_dict</span><span class="s0">,</span>
+        <span class="s1">}</span>
+        <span class="s0">if </span><span class="s1">ireq.user_supplied </span><span class="s0">and </span><span class="s1">ireq.extras:</span>
+            <span class="s3"># For top level requirements, the list of requested extras, if any.</span>
+            <span class="s1">res[</span><span class="s2">&quot;requested_extras&quot;</span><span class="s1">] = list(sorted(ireq.extras))</span>
+        <span class="s0">return </span><span class="s1">res</span>
+
+    <span class="s0">def </span><span class="s1">to_dict(self) -&gt; Dict[str</span><span class="s0">, </span><span class="s1">Any]:</span>
+        <span class="s0">return </span><span class="s1">{</span>
+            <span class="s2">&quot;version&quot;</span><span class="s1">: </span><span class="s2">&quot;1&quot;</span><span class="s0">,</span>
+            <span class="s2">&quot;pip_version&quot;</span><span class="s1">: __version__</span><span class="s0">,</span>
+            <span class="s2">&quot;install&quot;</span><span class="s1">: [</span>
+                <span class="s1">self._install_req_to_dict(ireq) </span><span class="s0">for </span><span class="s1">ireq </span><span class="s0">in </span><span class="s1">self._install_requirements</span>
+            <span class="s1">]</span><span class="s0">,</span>
+            <span class="s3"># https://peps.python.org/pep-0508/#environment-markers</span>
+            <span class="s3"># TODO: currently, the resolver uses the default environment to evaluate</span>
+            <span class="s3"># environment markers, so that is what we report here. In the future, it</span>
+            <span class="s3"># should also take into account options such as --python-version or</span>
+            <span class="s3"># --platform, perhaps under the form of an environment_override field?</span>
+            <span class="s3"># https://github.com/pypa/pip/issues/11198</span>
+            <span class="s2">&quot;environment&quot;</span><span class="s1">: default_environment()</span><span class="s0">,</span>
+        <span class="s1">}</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<html>
+<head>
+<title>file_storage.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+file_storage.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterator</span>
+<span class="s0">from </span><span class="s1">os </span><span class="s0">import </span><span class="s1">PathLike</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Any</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">IO</span>
+
+<span class="s0">from </span><span class="s1">.headers </span><span class="s0">import </span><span class="s1">Headers</span>
+<span class="s0">from </span><span class="s1">.structures </span><span class="s0">import </span><span class="s1">MultiDict</span>
+
+<span class="s0">class </span><span class="s1">FileStorage:</span>
+    <span class="s1">name: str | </span><span class="s0">None</span>
+    <span class="s1">stream: IO[bytes]</span>
+    <span class="s1">filename: str | </span><span class="s0">None</span>
+    <span class="s1">headers: Headers</span>
+    <span class="s1">_parsed_content_type: tuple[str</span><span class="s0">, </span><span class="s1">dict[str</span><span class="s0">, </span><span class="s1">str]]</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">stream: IO[bytes] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">filename: str | PathLike | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">name: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">content_type: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">content_length: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">headers: Headers | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_parse_content_type(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">content_type(self) -&gt; str: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">content_length(self) -&gt; int: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">mimetype(self) -&gt; str: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">mimetype_params(self) -&gt; dict[str</span><span class="s0">, </span><span class="s1">str]: ...</span>
+    <span class="s0">def </span><span class="s1">save(self</span><span class="s0">, </span><span class="s1">dst: str | PathLike | IO[bytes]</span><span class="s0">, </span><span class="s1">buffer_size: int = ...) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">close(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">__bool__(self) -&gt; bool: ...</span>
+    <span class="s0">def </span><span class="s1">__getattr__(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; Any: ...</span>
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; Iterator[bytes]: ...</span>
+    <span class="s0">def </span><span class="s1">__repr__(self) -&gt; str: ...</span>
+
+<span class="s0">class </span><span class="s1">FileMultiDict(MultiDict[str</span><span class="s0">, </span><span class="s1">FileStorage]):</span>
+    <span class="s0">def </span><span class="s1">add_file(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">name: str</span><span class="s0">,</span>
+        <span class="s1">file: FileStorage | str | IO[bytes]</span><span class="s0">,</span>
+        <span class="s1">filename: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">content_type: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+</pre>
+</body>
+</html>

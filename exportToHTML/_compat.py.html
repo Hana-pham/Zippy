@@ -1,0 +1,646 @@
+<html>
+<head>
+<title>_compat.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #808080;}
+.s5 { color: #6897bb;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_compat.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">codecs</span>
+<span class="s0">import </span><span class="s1">io</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">weakref </span><span class="s0">import </span><span class="s1">WeakKeyDictionary</span>
+
+<span class="s1">CYGWIN = sys.platform.startswith(</span><span class="s2">&quot;cygwin&quot;</span><span class="s1">)</span>
+<span class="s1">WIN = sys.platform.startswith(</span><span class="s2">&quot;win&quot;</span><span class="s1">)</span>
+<span class="s1">auto_wrap_for_ansi: t.Optional[t.Callable[[t.TextIO]</span><span class="s0">, </span><span class="s1">t.TextIO]] = </span><span class="s0">None</span>
+<span class="s1">_ansi_re = re.compile(</span><span class="s2">r&quot;\033\[[;?0-9]*[a-zA-Z]&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_make_text_stream(</span>
+    <span class="s1">stream: t.BinaryIO</span><span class="s0">,</span>
+    <span class="s1">encoding: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">errors: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">force_readable: bool = </span><span class="s0">False,</span>
+    <span class="s1">force_writable: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s0">if </span><span class="s1">encoding </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s1">encoding = get_best_encoding(stream)</span>
+    <span class="s0">if </span><span class="s1">errors </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s1">errors = </span><span class="s2">&quot;replace&quot;</span>
+    <span class="s0">return </span><span class="s1">_NonClosingTextIOWrapper(</span>
+        <span class="s1">stream</span><span class="s0">,</span>
+        <span class="s1">encoding</span><span class="s0">,</span>
+        <span class="s1">errors</span><span class="s0">,</span>
+        <span class="s1">line_buffering=</span><span class="s0">True,</span>
+        <span class="s1">force_readable=force_readable</span><span class="s0">,</span>
+        <span class="s1">force_writable=force_writable</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">is_ascii_encoding(encoding: str) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;Checks if a given encoding is ascii.&quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">codecs.lookup(encoding).name == </span><span class="s2">&quot;ascii&quot;</span>
+    <span class="s0">except </span><span class="s1">LookupError:</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">get_best_encoding(stream: t.IO[t.Any]) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Returns the default stream encoding if not found.&quot;&quot;&quot;</span>
+    <span class="s1">rv = getattr(stream</span><span class="s0">, </span><span class="s2">&quot;encoding&quot;</span><span class="s0">, None</span><span class="s1">) </span><span class="s0">or </span><span class="s1">sys.getdefaultencoding()</span>
+    <span class="s0">if </span><span class="s1">is_ascii_encoding(rv):</span>
+        <span class="s0">return </span><span class="s2">&quot;utf-8&quot;</span>
+    <span class="s0">return </span><span class="s1">rv</span>
+
+
+<span class="s0">class </span><span class="s1">_NonClosingTextIOWrapper(io.TextIOWrapper):</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">stream: t.BinaryIO</span><span class="s0">,</span>
+        <span class="s1">encoding: t.Optional[str]</span><span class="s0">,</span>
+        <span class="s1">errors: t.Optional[str]</span><span class="s0">,</span>
+        <span class="s1">force_readable: bool = </span><span class="s0">False,</span>
+        <span class="s1">force_writable: bool = </span><span class="s0">False,</span>
+        <span class="s1">**extra: t.Any</span><span class="s0">,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._stream = stream = t.cast(</span>
+            <span class="s1">t.BinaryIO</span><span class="s0">, </span><span class="s1">_FixupStream(stream</span><span class="s0">, </span><span class="s1">force_readable</span><span class="s0">, </span><span class="s1">force_writable)</span>
+        <span class="s1">)</span>
+        <span class="s1">super().__init__(stream</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors</span><span class="s0">, </span><span class="s1">**extra)</span>
+
+    <span class="s0">def </span><span class="s1">__del__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">self.detach()</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">pass</span>
+
+    <span class="s0">def </span><span class="s1">isatty(self) -&gt; bool:</span>
+        <span class="s4"># https://bitbucket.org/pypy/pypy/issue/1803</span>
+        <span class="s0">return </span><span class="s1">self._stream.isatty()</span>
+
+
+<span class="s0">class </span><span class="s1">_FixupStream:</span>
+    <span class="s3">&quot;&quot;&quot;The new io interface needs more from streams than streams 
+    traditionally implement.  As such, this fix-up code is necessary in 
+    some circumstances. 
+ 
+    The forcing of readable and writable flags are there because some tools 
+    put badly patched objects on sys (one such offender are certain version 
+    of jupyter notebook). 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">stream: t.BinaryIO</span><span class="s0">,</span>
+        <span class="s1">force_readable: bool = </span><span class="s0">False,</span>
+        <span class="s1">force_writable: bool = </span><span class="s0">False,</span>
+    <span class="s1">):</span>
+        <span class="s1">self._stream = stream</span>
+        <span class="s1">self._force_readable = force_readable</span>
+        <span class="s1">self._force_writable = force_writable</span>
+
+    <span class="s0">def </span><span class="s1">__getattr__(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; t.Any:</span>
+        <span class="s0">return </span><span class="s1">getattr(self._stream</span><span class="s0">, </span><span class="s1">name)</span>
+
+    <span class="s0">def </span><span class="s1">read1(self</span><span class="s0">, </span><span class="s1">size: int) -&gt; bytes:</span>
+        <span class="s1">f = getattr(self._stream</span><span class="s0">, </span><span class="s2">&quot;read1&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">f </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">t.cast(bytes</span><span class="s0">, </span><span class="s1">f(size))</span>
+
+        <span class="s0">return </span><span class="s1">self._stream.read(size)</span>
+
+    <span class="s0">def </span><span class="s1">readable(self) -&gt; bool:</span>
+        <span class="s0">if </span><span class="s1">self._force_readable:</span>
+            <span class="s0">return True</span>
+        <span class="s1">x = getattr(self._stream</span><span class="s0">, </span><span class="s2">&quot;readable&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">x </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">t.cast(bool</span><span class="s0">, </span><span class="s1">x())</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">self._stream.read(</span><span class="s5">0</span><span class="s1">)</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">return False</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">writable(self) -&gt; bool:</span>
+        <span class="s0">if </span><span class="s1">self._force_writable:</span>
+            <span class="s0">return True</span>
+        <span class="s1">x = getattr(self._stream</span><span class="s0">, </span><span class="s2">&quot;writable&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">x </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">t.cast(bool</span><span class="s0">, </span><span class="s1">x())</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">self._stream.write(</span><span class="s2">&quot;&quot;</span><span class="s1">)  </span><span class="s4"># type: ignore</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">self._stream.write(</span><span class="s6">b&quot;&quot;</span><span class="s1">)</span>
+            <span class="s0">except </span><span class="s1">Exception:</span>
+                <span class="s0">return False</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">seekable(self) -&gt; bool:</span>
+        <span class="s1">x = getattr(self._stream</span><span class="s0">, </span><span class="s2">&quot;seekable&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">x </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">t.cast(bool</span><span class="s0">, </span><span class="s1">x())</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">self._stream.seek(self._stream.tell())</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">return False</span>
+        <span class="s0">return True</span>
+
+
+<span class="s0">def </span><span class="s1">_is_binary_reader(stream: t.IO[t.Any]</span><span class="s0">, </span><span class="s1">default: bool = </span><span class="s0">False</span><span class="s1">) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">isinstance(stream.read(</span><span class="s5">0</span><span class="s1">)</span><span class="s0">, </span><span class="s1">bytes)</span>
+    <span class="s0">except </span><span class="s1">Exception:</span>
+        <span class="s0">return </span><span class="s1">default</span>
+        <span class="s4"># This happens in some cases where the stream was already</span>
+        <span class="s4"># closed.  In this case, we assume the default.</span>
+
+
+<span class="s0">def </span><span class="s1">_is_binary_writer(stream: t.IO[t.Any]</span><span class="s0">, </span><span class="s1">default: bool = </span><span class="s0">False</span><span class="s1">) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">stream.write(</span><span class="s6">b&quot;&quot;</span><span class="s1">)</span>
+    <span class="s0">except </span><span class="s1">Exception:</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">stream.write(</span><span class="s2">&quot;&quot;</span><span class="s1">)</span>
+            <span class="s0">return False</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">pass</span>
+        <span class="s0">return </span><span class="s1">default</span>
+    <span class="s0">return True</span>
+
+
+<span class="s0">def </span><span class="s1">_find_binary_reader(stream: t.IO[t.Any]) -&gt; t.Optional[t.BinaryIO]:</span>
+    <span class="s4"># We need to figure out if the given stream is already binary.</span>
+    <span class="s4"># This can happen because the official docs recommend detaching</span>
+    <span class="s4"># the streams to get binary streams.  Some code might do this, so</span>
+    <span class="s4"># we need to deal with this case explicitly.</span>
+    <span class="s0">if </span><span class="s1">_is_binary_reader(stream</span><span class="s0">, False</span><span class="s1">):</span>
+        <span class="s0">return </span><span class="s1">t.cast(t.BinaryIO</span><span class="s0">, </span><span class="s1">stream)</span>
+
+    <span class="s1">buf = getattr(stream</span><span class="s0">, </span><span class="s2">&quot;buffer&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+
+    <span class="s4"># Same situation here; this time we assume that the buffer is</span>
+    <span class="s4"># actually binary in case it's closed.</span>
+    <span class="s0">if </span><span class="s1">buf </span><span class="s0">is not None and </span><span class="s1">_is_binary_reader(buf</span><span class="s0">, True</span><span class="s1">):</span>
+        <span class="s0">return </span><span class="s1">t.cast(t.BinaryIO</span><span class="s0">, </span><span class="s1">buf)</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">_find_binary_writer(stream: t.IO[t.Any]) -&gt; t.Optional[t.BinaryIO]:</span>
+    <span class="s4"># We need to figure out if the given stream is already binary.</span>
+    <span class="s4"># This can happen because the official docs recommend detaching</span>
+    <span class="s4"># the streams to get binary streams.  Some code might do this, so</span>
+    <span class="s4"># we need to deal with this case explicitly.</span>
+    <span class="s0">if </span><span class="s1">_is_binary_writer(stream</span><span class="s0">, False</span><span class="s1">):</span>
+        <span class="s0">return </span><span class="s1">t.cast(t.BinaryIO</span><span class="s0">, </span><span class="s1">stream)</span>
+
+    <span class="s1">buf = getattr(stream</span><span class="s0">, </span><span class="s2">&quot;buffer&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+
+    <span class="s4"># Same situation here; this time we assume that the buffer is</span>
+    <span class="s4"># actually binary in case it's closed.</span>
+    <span class="s0">if </span><span class="s1">buf </span><span class="s0">is not None and </span><span class="s1">_is_binary_writer(buf</span><span class="s0">, True</span><span class="s1">):</span>
+        <span class="s0">return </span><span class="s1">t.cast(t.BinaryIO</span><span class="s0">, </span><span class="s1">buf)</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">_stream_is_misconfigured(stream: t.TextIO) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;A stream is misconfigured if its encoding is ASCII.&quot;&quot;&quot;</span>
+    <span class="s4"># If the stream does not have an encoding set, we assume it's set</span>
+    <span class="s4"># to ASCII.  This appears to happen in certain unittest</span>
+    <span class="s4"># environments.  It's not quite clear what the correct behavior is</span>
+    <span class="s4"># but this at least will force Click to recover somehow.</span>
+    <span class="s0">return </span><span class="s1">is_ascii_encoding(getattr(stream</span><span class="s0">, </span><span class="s2">&quot;encoding&quot;</span><span class="s0">, None</span><span class="s1">) </span><span class="s0">or </span><span class="s2">&quot;ascii&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_compat_stream_attr(stream: t.TextIO</span><span class="s0">, </span><span class="s1">attr: str</span><span class="s0">, </span><span class="s1">value: t.Optional[str]) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;A stream attribute is compatible if it is equal to the 
+    desired value or the desired value is unset and the attribute 
+    has a value. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">stream_value = getattr(stream</span><span class="s0">, </span><span class="s1">attr</span><span class="s0">, None</span><span class="s1">)</span>
+    <span class="s0">return </span><span class="s1">stream_value == value </span><span class="s0">or </span><span class="s1">(value </span><span class="s0">is None and </span><span class="s1">stream_value </span><span class="s0">is not None</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_compatible_text_stream(</span>
+    <span class="s1">stream: t.TextIO</span><span class="s0">, </span><span class="s1">encoding: t.Optional[str]</span><span class="s0">, </span><span class="s1">errors: t.Optional[str]</span>
+<span class="s1">) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;Check if a stream's encoding and errors attributes are 
+    compatible with the desired values. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">_is_compat_stream_attr(</span>
+        <span class="s1">stream</span><span class="s0">, </span><span class="s2">&quot;encoding&quot;</span><span class="s0">, </span><span class="s1">encoding</span>
+    <span class="s1">) </span><span class="s0">and </span><span class="s1">_is_compat_stream_attr(stream</span><span class="s0">, </span><span class="s2">&quot;errors&quot;</span><span class="s0">, </span><span class="s1">errors)</span>
+
+
+<span class="s0">def </span><span class="s1">_force_correct_text_stream(</span>
+    <span class="s1">text_stream: t.IO[t.Any]</span><span class="s0">,</span>
+    <span class="s1">encoding: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">errors: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">is_binary: t.Callable[[t.IO[t.Any]</span><span class="s0">, </span><span class="s1">bool]</span><span class="s0">, </span><span class="s1">bool]</span><span class="s0">,</span>
+    <span class="s1">find_binary: t.Callable[[t.IO[t.Any]]</span><span class="s0">, </span><span class="s1">t.Optional[t.BinaryIO]]</span><span class="s0">,</span>
+    <span class="s1">force_readable: bool = </span><span class="s0">False,</span>
+    <span class="s1">force_writable: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s0">if </span><span class="s1">is_binary(text_stream</span><span class="s0">, False</span><span class="s1">):</span>
+        <span class="s1">binary_reader = t.cast(t.BinaryIO</span><span class="s0">, </span><span class="s1">text_stream)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">text_stream = t.cast(t.TextIO</span><span class="s0">, </span><span class="s1">text_stream)</span>
+        <span class="s4"># If the stream looks compatible, and won't default to a</span>
+        <span class="s4"># misconfigured ascii encoding, return it as-is.</span>
+        <span class="s0">if </span><span class="s1">_is_compatible_text_stream(text_stream</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors) </span><span class="s0">and not </span><span class="s1">(</span>
+            <span class="s1">encoding </span><span class="s0">is None and </span><span class="s1">_stream_is_misconfigured(text_stream)</span>
+        <span class="s1">):</span>
+            <span class="s0">return </span><span class="s1">text_stream</span>
+
+        <span class="s4"># Otherwise, get the underlying binary reader.</span>
+        <span class="s1">possible_binary_reader = find_binary(text_stream)</span>
+
+        <span class="s4"># If that's not possible, silently use the original reader</span>
+        <span class="s4"># and get mojibake instead of exceptions.</span>
+        <span class="s0">if </span><span class="s1">possible_binary_reader </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">text_stream</span>
+
+        <span class="s1">binary_reader = possible_binary_reader</span>
+
+    <span class="s4"># Default errors to replace instead of strict in order to get</span>
+    <span class="s4"># something that works.</span>
+    <span class="s0">if </span><span class="s1">errors </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s1">errors = </span><span class="s2">&quot;replace&quot;</span>
+
+    <span class="s4"># Wrap the binary stream in a text stream with the correct</span>
+    <span class="s4"># encoding parameters.</span>
+    <span class="s0">return </span><span class="s1">_make_text_stream(</span>
+        <span class="s1">binary_reader</span><span class="s0">,</span>
+        <span class="s1">encoding</span><span class="s0">,</span>
+        <span class="s1">errors</span><span class="s0">,</span>
+        <span class="s1">force_readable=force_readable</span><span class="s0">,</span>
+        <span class="s1">force_writable=force_writable</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_force_correct_text_reader(</span>
+    <span class="s1">text_reader: t.IO[t.Any]</span><span class="s0">,</span>
+    <span class="s1">encoding: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">errors: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">force_readable: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_stream(</span>
+        <span class="s1">text_reader</span><span class="s0">,</span>
+        <span class="s1">encoding</span><span class="s0">,</span>
+        <span class="s1">errors</span><span class="s0">,</span>
+        <span class="s1">_is_binary_reader</span><span class="s0">,</span>
+        <span class="s1">_find_binary_reader</span><span class="s0">,</span>
+        <span class="s1">force_readable=force_readable</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_force_correct_text_writer(</span>
+    <span class="s1">text_writer: t.IO[t.Any]</span><span class="s0">,</span>
+    <span class="s1">encoding: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">errors: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">force_writable: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_stream(</span>
+        <span class="s1">text_writer</span><span class="s0">,</span>
+        <span class="s1">encoding</span><span class="s0">,</span>
+        <span class="s1">errors</span><span class="s0">,</span>
+        <span class="s1">_is_binary_writer</span><span class="s0">,</span>
+        <span class="s1">_find_binary_writer</span><span class="s0">,</span>
+        <span class="s1">force_writable=force_writable</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_binary_stdin() -&gt; t.BinaryIO:</span>
+    <span class="s1">reader = _find_binary_reader(sys.stdin)</span>
+    <span class="s0">if </span><span class="s1">reader </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError(</span><span class="s2">&quot;Was not able to determine binary stream for sys.stdin.&quot;</span><span class="s1">)</span>
+    <span class="s0">return </span><span class="s1">reader</span>
+
+
+<span class="s0">def </span><span class="s1">get_binary_stdout() -&gt; t.BinaryIO:</span>
+    <span class="s1">writer = _find_binary_writer(sys.stdout)</span>
+    <span class="s0">if </span><span class="s1">writer </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError(</span><span class="s2">&quot;Was not able to determine binary stream for sys.stdout.&quot;</span><span class="s1">)</span>
+    <span class="s0">return </span><span class="s1">writer</span>
+
+
+<span class="s0">def </span><span class="s1">get_binary_stderr() -&gt; t.BinaryIO:</span>
+    <span class="s1">writer = _find_binary_writer(sys.stderr)</span>
+    <span class="s0">if </span><span class="s1">writer </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">raise </span><span class="s1">RuntimeError(</span><span class="s2">&quot;Was not able to determine binary stream for sys.stderr.&quot;</span><span class="s1">)</span>
+    <span class="s0">return </span><span class="s1">writer</span>
+
+
+<span class="s0">def </span><span class="s1">get_text_stdin(</span>
+    <span class="s1">encoding: t.Optional[str] = </span><span class="s0">None, </span><span class="s1">errors: t.Optional[str] = </span><span class="s0">None</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s1">rv = _get_windows_console_stream(sys.stdin</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors)</span>
+    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_reader(sys.stdin</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors</span><span class="s0">, </span><span class="s1">force_readable=</span><span class="s0">True</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_text_stdout(</span>
+    <span class="s1">encoding: t.Optional[str] = </span><span class="s0">None, </span><span class="s1">errors: t.Optional[str] = </span><span class="s0">None</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s1">rv = _get_windows_console_stream(sys.stdout</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors)</span>
+    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_writer(sys.stdout</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors</span><span class="s0">, </span><span class="s1">force_writable=</span><span class="s0">True</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_text_stderr(</span>
+    <span class="s1">encoding: t.Optional[str] = </span><span class="s0">None, </span><span class="s1">errors: t.Optional[str] = </span><span class="s0">None</span>
+<span class="s1">) -&gt; t.TextIO:</span>
+    <span class="s1">rv = _get_windows_console_stream(sys.stderr</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors)</span>
+    <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+    <span class="s0">return </span><span class="s1">_force_correct_text_writer(sys.stderr</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors</span><span class="s0">, </span><span class="s1">force_writable=</span><span class="s0">True</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_wrap_io_open(</span>
+    <span class="s1">file: t.Union[str</span><span class="s0">, </span><span class="s2">&quot;os.PathLike[str]&quot;</span><span class="s0">, </span><span class="s1">int]</span><span class="s0">,</span>
+    <span class="s1">mode: str</span><span class="s0">,</span>
+    <span class="s1">encoding: t.Optional[str]</span><span class="s0">,</span>
+    <span class="s1">errors: t.Optional[str]</span><span class="s0">,</span>
+<span class="s1">) -&gt; t.IO[t.Any]:</span>
+    <span class="s3">&quot;&quot;&quot;Handles not passing ``encoding`` and ``errors`` in binary mode.&quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s2">&quot;b&quot; </span><span class="s0">in </span><span class="s1">mode:</span>
+        <span class="s0">return </span><span class="s1">open(file</span><span class="s0">, </span><span class="s1">mode)</span>
+
+    <span class="s0">return </span><span class="s1">open(file</span><span class="s0">, </span><span class="s1">mode</span><span class="s0">, </span><span class="s1">encoding=encoding</span><span class="s0">, </span><span class="s1">errors=errors)</span>
+
+
+<span class="s0">def </span><span class="s1">open_stream(</span>
+    <span class="s1">filename: </span><span class="s2">&quot;t.Union[str, os.PathLike[str]]&quot;</span><span class="s0">,</span>
+    <span class="s1">mode: str = </span><span class="s2">&quot;r&quot;</span><span class="s0">,</span>
+    <span class="s1">encoding: t.Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">errors: t.Optional[str] = </span><span class="s2">&quot;strict&quot;</span><span class="s0">,</span>
+    <span class="s1">atomic: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; t.Tuple[t.IO[t.Any]</span><span class="s0">, </span><span class="s1">bool]:</span>
+    <span class="s1">binary = </span><span class="s2">&quot;b&quot; </span><span class="s0">in </span><span class="s1">mode</span>
+    <span class="s1">filename = os.fspath(filename)</span>
+
+    <span class="s4"># Standard streams first. These are simple because they ignore the</span>
+    <span class="s4"># atomic flag. Use fsdecode to handle Path(&quot;-&quot;).</span>
+    <span class="s0">if </span><span class="s1">os.fsdecode(filename) == </span><span class="s2">&quot;-&quot;</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">any(m </span><span class="s0">in </span><span class="s1">mode </span><span class="s0">for </span><span class="s1">m </span><span class="s0">in </span><span class="s1">[</span><span class="s2">&quot;w&quot;</span><span class="s0">, </span><span class="s2">&quot;a&quot;</span><span class="s0">, </span><span class="s2">&quot;x&quot;</span><span class="s1">]):</span>
+            <span class="s0">if </span><span class="s1">binary:</span>
+                <span class="s0">return </span><span class="s1">get_binary_stdout()</span><span class="s0">, False</span>
+            <span class="s0">return </span><span class="s1">get_text_stdout(encoding=encoding</span><span class="s0">, </span><span class="s1">errors=errors)</span><span class="s0">, False</span>
+        <span class="s0">if </span><span class="s1">binary:</span>
+            <span class="s0">return </span><span class="s1">get_binary_stdin()</span><span class="s0">, False</span>
+        <span class="s0">return </span><span class="s1">get_text_stdin(encoding=encoding</span><span class="s0">, </span><span class="s1">errors=errors)</span><span class="s0">, False</span>
+
+    <span class="s4"># Non-atomic writes directly go out through the regular open functions.</span>
+    <span class="s0">if not </span><span class="s1">atomic:</span>
+        <span class="s0">return </span><span class="s1">_wrap_io_open(filename</span><span class="s0">, </span><span class="s1">mode</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors)</span><span class="s0">, True</span>
+
+    <span class="s4"># Some usability stuff for atomic writes</span>
+    <span class="s0">if </span><span class="s2">&quot;a&quot; </span><span class="s0">in </span><span class="s1">mode:</span>
+        <span class="s0">raise </span><span class="s1">ValueError(</span>
+            <span class="s2">&quot;Appending to an existing file is not supported, because that&quot;</span>
+            <span class="s2">&quot; would involve an expensive `copy`-operation to a temporary&quot;</span>
+            <span class="s2">&quot; file. Open the file in normal `w`-mode and copy explicitly&quot;</span>
+            <span class="s2">&quot; if that's what you're after.&quot;</span>
+        <span class="s1">)</span>
+    <span class="s0">if </span><span class="s2">&quot;x&quot; </span><span class="s0">in </span><span class="s1">mode:</span>
+        <span class="s0">raise </span><span class="s1">ValueError(</span><span class="s2">&quot;Use the `overwrite`-parameter instead.&quot;</span><span class="s1">)</span>
+    <span class="s0">if </span><span class="s2">&quot;w&quot; </span><span class="s0">not in </span><span class="s1">mode:</span>
+        <span class="s0">raise </span><span class="s1">ValueError(</span><span class="s2">&quot;Atomic writes only make sense with `w`-mode.&quot;</span><span class="s1">)</span>
+
+    <span class="s4"># Atomic writes are more complicated.  They work by opening a file</span>
+    <span class="s4"># as a proxy in the same folder and then using the fdopen</span>
+    <span class="s4"># functionality to wrap it in a Python file.  Then we wrap it in an</span>
+    <span class="s4"># atomic file that moves the file over on close.</span>
+    <span class="s0">import </span><span class="s1">errno</span>
+    <span class="s0">import </span><span class="s1">random</span>
+
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">perm: t.Optional[int] = os.stat(filename).st_mode</span>
+    <span class="s0">except </span><span class="s1">OSError:</span>
+        <span class="s1">perm = </span><span class="s0">None</span>
+
+    <span class="s1">flags = os.O_RDWR | os.O_CREAT | os.O_EXCL</span>
+
+    <span class="s0">if </span><span class="s1">binary:</span>
+        <span class="s1">flags |= getattr(os</span><span class="s0">, </span><span class="s2">&quot;O_BINARY&quot;</span><span class="s0">, </span><span class="s5">0</span><span class="s1">)</span>
+
+    <span class="s0">while True</span><span class="s1">:</span>
+        <span class="s1">tmp_filename = os.path.join(</span>
+            <span class="s1">os.path.dirname(filename)</span><span class="s0">,</span>
+            <span class="s2">f&quot;.__atomic-write</span><span class="s0">{</span><span class="s1">random.randrange(</span><span class="s5">1 </span><span class="s1">&lt;&lt; </span><span class="s5">32</span><span class="s1">)</span><span class="s0">:</span><span class="s2">08x</span><span class="s0">}</span><span class="s2">&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">fd = os.open(tmp_filename</span><span class="s0">, </span><span class="s1">flags</span><span class="s0">, </span><span class="s5">0o666 </span><span class="s0">if </span><span class="s1">perm </span><span class="s0">is None else </span><span class="s1">perm)</span>
+            <span class="s0">break</span>
+        <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">e:</span>
+            <span class="s0">if </span><span class="s1">e.errno == errno.EEXIST </span><span class="s0">or </span><span class="s1">(</span>
+                <span class="s1">os.name == </span><span class="s2">&quot;nt&quot;</span>
+                <span class="s0">and </span><span class="s1">e.errno == errno.EACCES</span>
+                <span class="s0">and </span><span class="s1">os.path.isdir(e.filename)</span>
+                <span class="s0">and </span><span class="s1">os.access(e.filename</span><span class="s0">, </span><span class="s1">os.W_OK)</span>
+            <span class="s1">):</span>
+                <span class="s0">continue</span>
+            <span class="s0">raise</span>
+
+    <span class="s0">if </span><span class="s1">perm </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s1">os.chmod(tmp_filename</span><span class="s0">, </span><span class="s1">perm)  </span><span class="s4"># in case perm includes bits in umask</span>
+
+    <span class="s1">f = _wrap_io_open(fd</span><span class="s0">, </span><span class="s1">mode</span><span class="s0">, </span><span class="s1">encoding</span><span class="s0">, </span><span class="s1">errors)</span>
+    <span class="s1">af = _AtomicFile(f</span><span class="s0">, </span><span class="s1">tmp_filename</span><span class="s0">, </span><span class="s1">os.path.realpath(filename))</span>
+    <span class="s0">return </span><span class="s1">t.cast(t.IO[t.Any]</span><span class="s0">, </span><span class="s1">af)</span><span class="s0">, True</span>
+
+
+<span class="s0">class </span><span class="s1">_AtomicFile:</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">f: t.IO[t.Any]</span><span class="s0">, </span><span class="s1">tmp_filename: str</span><span class="s0">, </span><span class="s1">real_filename: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._f = f</span>
+        <span class="s1">self._tmp_filename = tmp_filename</span>
+        <span class="s1">self._real_filename = real_filename</span>
+        <span class="s1">self.closed = </span><span class="s0">False</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">name(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s1">self._real_filename</span>
+
+    <span class="s0">def </span><span class="s1">close(self</span><span class="s0">, </span><span class="s1">delete: bool = </span><span class="s0">False</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">self.closed:</span>
+            <span class="s0">return</span>
+        <span class="s1">self._f.close()</span>
+        <span class="s1">os.replace(self._tmp_filename</span><span class="s0">, </span><span class="s1">self._real_filename)</span>
+        <span class="s1">self.closed = </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">__getattr__(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; t.Any:</span>
+        <span class="s0">return </span><span class="s1">getattr(self._f</span><span class="s0">, </span><span class="s1">name)</span>
+
+    <span class="s0">def </span><span class="s1">__enter__(self) -&gt; </span><span class="s2">&quot;_AtomicFile&quot;</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__exit__(self</span><span class="s0">, </span><span class="s1">exc_type: t.Optional[t.Type[BaseException]]</span><span class="s0">, </span><span class="s1">*_: t.Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.close(delete=exc_type </span><span class="s0">is not None</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s1">repr(self._f)</span>
+
+
+<span class="s0">def </span><span class="s1">strip_ansi(value: str) -&gt; str:</span>
+    <span class="s0">return </span><span class="s1">_ansi_re.sub(</span><span class="s2">&quot;&quot;</span><span class="s0">, </span><span class="s1">value)</span>
+
+
+<span class="s0">def </span><span class="s1">_is_jupyter_kernel_output(stream: t.IO[t.Any]) -&gt; bool:</span>
+    <span class="s0">while </span><span class="s1">isinstance(stream</span><span class="s0">, </span><span class="s1">(_FixupStream</span><span class="s0">, </span><span class="s1">_NonClosingTextIOWrapper)):</span>
+        <span class="s1">stream = stream._stream</span>
+
+    <span class="s0">return </span><span class="s1">stream.__class__.__module__.startswith(</span><span class="s2">&quot;ipykernel.&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">should_strip_ansi(</span>
+    <span class="s1">stream: t.Optional[t.IO[t.Any]] = </span><span class="s0">None, </span><span class="s1">color: t.Optional[bool] = </span><span class="s0">None</span>
+<span class="s1">) -&gt; bool:</span>
+    <span class="s0">if </span><span class="s1">color </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">stream </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">stream = sys.stdin</span>
+        <span class="s0">return not </span><span class="s1">isatty(stream) </span><span class="s0">and not </span><span class="s1">_is_jupyter_kernel_output(stream)</span>
+    <span class="s0">return not </span><span class="s1">color</span>
+
+
+<span class="s4"># On Windows, wrap the output streams with colorama to support ANSI</span>
+<span class="s4"># color codes.</span>
+<span class="s4"># NOTE: double check is needed so mypy does not analyze this on Linux</span>
+<span class="s0">if </span><span class="s1">sys.platform.startswith(</span><span class="s2">&quot;win&quot;</span><span class="s1">) </span><span class="s0">and </span><span class="s1">WIN:</span>
+    <span class="s0">from </span><span class="s1">._winconsole </span><span class="s0">import </span><span class="s1">_get_windows_console_stream</span>
+
+    <span class="s0">def </span><span class="s1">_get_argv_encoding() -&gt; str:</span>
+        <span class="s0">import </span><span class="s1">locale</span>
+
+        <span class="s0">return </span><span class="s1">locale.getpreferredencoding()</span>
+
+    <span class="s1">_ansi_stream_wrappers: t.MutableMapping[t.TextIO</span><span class="s0">, </span><span class="s1">t.TextIO] = WeakKeyDictionary()</span>
+
+    <span class="s0">def </span><span class="s1">auto_wrap_for_ansi(  </span><span class="s4"># noqa: F811</span>
+        <span class="s1">stream: t.TextIO</span><span class="s0">, </span><span class="s1">color: t.Optional[bool] = </span><span class="s0">None</span>
+    <span class="s1">) -&gt; t.TextIO:</span>
+        <span class="s3">&quot;&quot;&quot;Support ANSI color and style codes on Windows by wrapping a 
+        stream with colorama. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">cached = _ansi_stream_wrappers.get(stream)</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s1">cached = </span><span class="s0">None</span>
+
+        <span class="s0">if </span><span class="s1">cached </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">cached</span>
+
+        <span class="s0">import </span><span class="s1">colorama</span>
+
+        <span class="s1">strip = should_strip_ansi(stream</span><span class="s0">, </span><span class="s1">color)</span>
+        <span class="s1">ansi_wrapper = colorama.AnsiToWin32(stream</span><span class="s0">, </span><span class="s1">strip=strip)</span>
+        <span class="s1">rv = t.cast(t.TextIO</span><span class="s0">, </span><span class="s1">ansi_wrapper.stream)</span>
+        <span class="s1">_write = rv.write</span>
+
+        <span class="s0">def </span><span class="s1">_safe_write(s):</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s0">return </span><span class="s1">_write(s)</span>
+            <span class="s0">except </span><span class="s1">BaseException:</span>
+                <span class="s1">ansi_wrapper.reset_all()</span>
+                <span class="s0">raise</span>
+
+        <span class="s1">rv.write = _safe_write</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">_ansi_stream_wrappers[stream] = rv</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">pass</span>
+
+        <span class="s0">return </span><span class="s1">rv</span>
+
+<span class="s0">else</span><span class="s1">:</span>
+
+    <span class="s0">def </span><span class="s1">_get_argv_encoding() -&gt; str:</span>
+        <span class="s0">return </span><span class="s1">getattr(sys.stdin</span><span class="s0">, </span><span class="s2">&quot;encoding&quot;</span><span class="s0">, None</span><span class="s1">) </span><span class="s0">or </span><span class="s1">sys.getfilesystemencoding()</span>
+
+    <span class="s0">def </span><span class="s1">_get_windows_console_stream(</span>
+        <span class="s1">f: t.TextIO</span><span class="s0">, </span><span class="s1">encoding: t.Optional[str]</span><span class="s0">, </span><span class="s1">errors: t.Optional[str]</span>
+    <span class="s1">) -&gt; t.Optional[t.TextIO]:</span>
+        <span class="s0">return None</span>
+
+
+<span class="s0">def </span><span class="s1">term_len(x: str) -&gt; int:</span>
+    <span class="s0">return </span><span class="s1">len(strip_ansi(x))</span>
+
+
+<span class="s0">def </span><span class="s1">isatty(stream: t.IO[t.Any]) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">stream.isatty()</span>
+    <span class="s0">except </span><span class="s1">Exception:</span>
+        <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">_make_cached_stream_func(</span>
+    <span class="s1">src_func: t.Callable[[]</span><span class="s0">, </span><span class="s1">t.Optional[t.TextIO]]</span><span class="s0">,</span>
+    <span class="s1">wrapper_func: t.Callable[[]</span><span class="s0">, </span><span class="s1">t.TextIO]</span><span class="s0">,</span>
+<span class="s1">) -&gt; t.Callable[[]</span><span class="s0">, </span><span class="s1">t.Optional[t.TextIO]]:</span>
+    <span class="s1">cache: t.MutableMapping[t.TextIO</span><span class="s0">, </span><span class="s1">t.TextIO] = WeakKeyDictionary()</span>
+
+    <span class="s0">def </span><span class="s1">func() -&gt; t.Optional[t.TextIO]:</span>
+        <span class="s1">stream = src_func()</span>
+
+        <span class="s0">if </span><span class="s1">stream </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return None</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">rv = cache.get(stream)</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s1">rv = </span><span class="s0">None</span>
+        <span class="s0">if </span><span class="s1">rv </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">rv</span>
+        <span class="s1">rv = wrapper_func()</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">cache[stream] = rv</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s0">pass</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">return </span><span class="s1">func</span>
+
+
+<span class="s1">_default_text_stdin = _make_cached_stream_func(</span><span class="s0">lambda</span><span class="s1">: sys.stdin</span><span class="s0">, </span><span class="s1">get_text_stdin)</span>
+<span class="s1">_default_text_stdout = _make_cached_stream_func(</span><span class="s0">lambda</span><span class="s1">: sys.stdout</span><span class="s0">, </span><span class="s1">get_text_stdout)</span>
+<span class="s1">_default_text_stderr = _make_cached_stream_func(</span><span class="s0">lambda</span><span class="s1">: sys.stderr</span><span class="s0">, </span><span class="s1">get_text_stderr)</span>
+
+
+<span class="s1">binary_streams: t.Mapping[str</span><span class="s0">, </span><span class="s1">t.Callable[[]</span><span class="s0">, </span><span class="s1">t.BinaryIO]] = {</span>
+    <span class="s2">&quot;stdin&quot;</span><span class="s1">: get_binary_stdin</span><span class="s0">,</span>
+    <span class="s2">&quot;stdout&quot;</span><span class="s1">: get_binary_stdout</span><span class="s0">,</span>
+    <span class="s2">&quot;stderr&quot;</span><span class="s1">: get_binary_stderr</span><span class="s0">,</span>
+<span class="s1">}</span>
+
+<span class="s1">text_streams: t.Mapping[</span>
+    <span class="s1">str</span><span class="s0">, </span><span class="s1">t.Callable[[t.Optional[str]</span><span class="s0">, </span><span class="s1">t.Optional[str]]</span><span class="s0">, </span><span class="s1">t.TextIO]</span>
+<span class="s1">] = {</span>
+    <span class="s2">&quot;stdin&quot;</span><span class="s1">: get_text_stdin</span><span class="s0">,</span>
+    <span class="s2">&quot;stdout&quot;</span><span class="s1">: get_text_stdout</span><span class="s0">,</span>
+    <span class="s2">&quot;stderr&quot;</span><span class="s1">: get_text_stderr</span><span class="s0">,</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

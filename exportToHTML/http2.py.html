@@ -1,0 +1,252 @@
+<html>
+<head>
+<title>http2.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+.s3 { color: #6a8759;}
+.s4 { color: #629755; font-style: italic;}
+.s5 { color: #6897bb;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+http2.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">threading</span>
+<span class="s0">import </span><span class="s1">types</span>
+<span class="s0">import </span><span class="s1">typing</span>
+
+<span class="s0">import </span><span class="s1">h2.config  </span><span class="s2"># type: ignore[import-untyped]</span>
+<span class="s0">import </span><span class="s1">h2.connection  </span><span class="s2"># type: ignore[import-untyped]</span>
+<span class="s0">import </span><span class="s1">h2.events  </span><span class="s2"># type: ignore[import-untyped]</span>
+
+<span class="s0">import </span><span class="s1">urllib3.connection</span>
+<span class="s0">import </span><span class="s1">urllib3.util.ssl_</span>
+<span class="s0">from </span><span class="s1">urllib3.response </span><span class="s0">import </span><span class="s1">BaseHTTPResponse</span>
+
+<span class="s0">from </span><span class="s1">._collections </span><span class="s0">import </span><span class="s1">HTTPHeaderDict</span>
+<span class="s0">from </span><span class="s1">.connection </span><span class="s0">import </span><span class="s1">HTTPSConnection</span>
+<span class="s0">from </span><span class="s1">.connectionpool </span><span class="s0">import </span><span class="s1">HTTPSConnectionPool</span>
+
+<span class="s1">orig_HTTPSConnection = HTTPSConnection</span>
+
+<span class="s1">T = typing.TypeVar(</span><span class="s3">&quot;T&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">_LockedObject(typing.Generic[T]):</span>
+    <span class="s4">&quot;&quot;&quot; 
+    A wrapper class that hides a specific object behind a lock. 
+ 
+    The goal here is to provide a simple way to protect access to an object 
+    that cannot safely be simultaneously accessed from multiple threads. The 
+    intended use of this class is simple: take hold of it with a context 
+    manager, which returns the protected object. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">obj: T):</span>
+        <span class="s1">self.lock = threading.RLock()</span>
+        <span class="s1">self._obj = obj</span>
+
+    <span class="s0">def </span><span class="s1">__enter__(self) -&gt; T:</span>
+        <span class="s1">self.lock.acquire()</span>
+        <span class="s0">return </span><span class="s1">self._obj</span>
+
+    <span class="s0">def </span><span class="s1">__exit__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">exc_type: type[BaseException] | </span><span class="s0">None,</span>
+        <span class="s1">exc_val: BaseException | </span><span class="s0">None,</span>
+        <span class="s1">exc_tb: types.TracebackType | </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.lock.release()</span>
+
+
+<span class="s0">class </span><span class="s1">HTTP2Connection(HTTPSConnection):</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">host: str</span><span class="s0">, </span><span class="s1">port: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None, </span><span class="s1">**kwargs: typing.Any</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._h2_conn = self._new_h2_conn()</span>
+        <span class="s1">self._h2_stream: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+        <span class="s1">self._h2_headers: list[tuple[bytes</span><span class="s0">, </span><span class="s1">bytes]] = []</span>
+
+        <span class="s0">if </span><span class="s3">&quot;proxy&quot; </span><span class="s0">in </span><span class="s1">kwargs </span><span class="s0">or </span><span class="s3">&quot;proxy_config&quot; </span><span class="s0">in </span><span class="s1">kwargs:  </span><span class="s2"># Defensive:</span>
+            <span class="s0">raise </span><span class="s1">NotImplementedError(</span><span class="s3">&quot;Proxies aren't supported with HTTP/2&quot;</span><span class="s1">)</span>
+
+        <span class="s1">super().__init__(host</span><span class="s0">, </span><span class="s1">port</span><span class="s0">, </span><span class="s1">**kwargs)</span>
+
+    <span class="s0">def </span><span class="s1">_new_h2_conn(self) -&gt; _LockedObject[h2.connection.H2Connection]:</span>
+        <span class="s1">config = h2.config.H2Configuration(client_side=</span><span class="s0">True</span><span class="s1">)</span>
+        <span class="s0">return </span><span class="s1">_LockedObject(h2.connection.H2Connection(config=config))</span>
+
+    <span class="s0">def </span><span class="s1">connect(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().connect()</span>
+
+        <span class="s0">with </span><span class="s1">self._h2_conn </span><span class="s0">as </span><span class="s1">h2_conn:</span>
+            <span class="s1">h2_conn.initiate_connection()</span>
+            <span class="s1">self.sock.sendall(h2_conn.data_to_send())</span>
+
+    <span class="s0">def </span><span class="s1">putrequest(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">method: str</span><span class="s0">,</span>
+        <span class="s1">url: str</span><span class="s0">,</span>
+        <span class="s1">skip_host: bool = </span><span class="s0">False,</span>
+        <span class="s1">skip_accept_encoding: bool = </span><span class="s0">False,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">with </span><span class="s1">self._h2_conn </span><span class="s0">as </span><span class="s1">h2_conn:</span>
+            <span class="s1">self._request_url = url</span>
+            <span class="s1">self._h2_stream = h2_conn.get_next_available_stream_id()</span>
+
+            <span class="s0">if </span><span class="s3">&quot;:&quot; </span><span class="s0">in </span><span class="s1">self.host:</span>
+                <span class="s1">authority = </span><span class="s3">f&quot;[</span><span class="s0">{</span><span class="s1">self.host</span><span class="s0">}</span><span class="s3">]:</span><span class="s0">{</span><span class="s1">self.port </span><span class="s0">or </span><span class="s5">443</span><span class="s0">}</span><span class="s3">&quot;</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">authority = </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">self.host</span><span class="s0">}</span><span class="s3">:</span><span class="s0">{</span><span class="s1">self.port </span><span class="s0">or </span><span class="s5">443</span><span class="s0">}</span><span class="s3">&quot;</span>
+
+            <span class="s1">self._h2_headers.extend(</span>
+                <span class="s1">(</span>
+                    <span class="s1">(</span><span class="s6">b&quot;:scheme&quot;</span><span class="s0">, </span><span class="s6">b&quot;https&quot;</span><span class="s1">)</span><span class="s0">,</span>
+                    <span class="s1">(</span><span class="s6">b&quot;:method&quot;</span><span class="s0">, </span><span class="s1">method.encode())</span><span class="s0">,</span>
+                    <span class="s1">(</span><span class="s6">b&quot;:authority&quot;</span><span class="s0">, </span><span class="s1">authority.encode())</span><span class="s0">,</span>
+                    <span class="s1">(</span><span class="s6">b&quot;:path&quot;</span><span class="s0">, </span><span class="s1">url.encode())</span><span class="s0">,</span>
+                <span class="s1">)</span>
+            <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">putheader(self</span><span class="s0">, </span><span class="s1">header: str</span><span class="s0">, </span><span class="s1">*values: str) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s2"># type: ignore[override]</span>
+        <span class="s0">for </span><span class="s1">value </span><span class="s0">in </span><span class="s1">values:</span>
+            <span class="s1">self._h2_headers.append(</span>
+                <span class="s1">(header.encode(</span><span class="s3">&quot;utf-8&quot;</span><span class="s1">).lower()</span><span class="s0">, </span><span class="s1">value.encode(</span><span class="s3">&quot;utf-8&quot;</span><span class="s1">))</span>
+            <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">endheaders(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s2"># type: ignore[override]</span>
+        <span class="s0">with </span><span class="s1">self._h2_conn </span><span class="s0">as </span><span class="s1">h2_conn:</span>
+            <span class="s1">h2_conn.send_headers(</span>
+                <span class="s1">stream_id=self._h2_stream</span><span class="s0">,</span>
+                <span class="s1">headers=self._h2_headers</span><span class="s0">,</span>
+                <span class="s1">end_stream=</span><span class="s0">True,</span>
+            <span class="s1">)</span>
+            <span class="s0">if </span><span class="s1">data_to_send := h2_conn.data_to_send():</span>
+                <span class="s1">self.sock.sendall(data_to_send)</span>
+
+    <span class="s0">def </span><span class="s1">send(self</span><span class="s0">, </span><span class="s1">data: bytes) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s2"># type: ignore[override]  # Defensive:</span>
+        <span class="s0">if not </span><span class="s1">data:</span>
+            <span class="s0">return</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError(</span><span class="s3">&quot;Sending data isn't supported yet&quot;</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">getresponse(  </span><span class="s2"># type: ignore[override]</span>
+        <span class="s1">self</span><span class="s0">,</span>
+    <span class="s1">) -&gt; HTTP2Response:</span>
+        <span class="s1">status = </span><span class="s0">None</span>
+        <span class="s1">data = bytearray()</span>
+        <span class="s0">with </span><span class="s1">self._h2_conn </span><span class="s0">as </span><span class="s1">h2_conn:</span>
+            <span class="s1">end_stream = </span><span class="s0">False</span>
+            <span class="s0">while not </span><span class="s1">end_stream:</span>
+                <span class="s2"># TODO: Arbitrary read value.</span>
+                <span class="s0">if </span><span class="s1">received_data := self.sock.recv(</span><span class="s5">65535</span><span class="s1">):</span>
+                    <span class="s1">events = h2_conn.receive_data(received_data)</span>
+                    <span class="s0">for </span><span class="s1">event </span><span class="s0">in </span><span class="s1">events:</span>
+                        <span class="s0">if </span><span class="s1">isinstance(event</span><span class="s0">, </span><span class="s1">h2.events.ResponseReceived):</span>
+                            <span class="s1">headers = HTTPHeaderDict()</span>
+                            <span class="s0">for </span><span class="s1">header</span><span class="s0">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">event.headers:</span>
+                                <span class="s0">if </span><span class="s1">header == </span><span class="s6">b&quot;:status&quot;</span><span class="s1">:</span>
+                                    <span class="s1">status = int(value.decode())</span>
+                                <span class="s0">else</span><span class="s1">:</span>
+                                    <span class="s1">headers.add(</span>
+                                        <span class="s1">header.decode(</span><span class="s3">&quot;ascii&quot;</span><span class="s1">)</span><span class="s0">, </span><span class="s1">value.decode(</span><span class="s3">&quot;ascii&quot;</span><span class="s1">)</span>
+                                    <span class="s1">)</span>
+
+                        <span class="s0">elif </span><span class="s1">isinstance(event</span><span class="s0">, </span><span class="s1">h2.events.DataReceived):</span>
+                            <span class="s1">data += event.data</span>
+                            <span class="s1">h2_conn.acknowledge_received_data(</span>
+                                <span class="s1">event.flow_controlled_length</span><span class="s0">, </span><span class="s1">event.stream_id</span>
+                            <span class="s1">)</span>
+
+                        <span class="s0">elif </span><span class="s1">isinstance(event</span><span class="s0">, </span><span class="s1">h2.events.StreamEnded):</span>
+                            <span class="s1">end_stream = </span><span class="s0">True</span>
+
+                <span class="s0">if </span><span class="s1">data_to_send := h2_conn.data_to_send():</span>
+                    <span class="s1">self.sock.sendall(data_to_send)</span>
+
+        <span class="s2"># We always close to not have to handle connection management.</span>
+        <span class="s1">self.close()</span>
+
+        <span class="s0">assert </span><span class="s1">status </span><span class="s0">is not None</span>
+        <span class="s0">return </span><span class="s1">HTTP2Response(</span>
+            <span class="s1">status=status</span><span class="s0">,</span>
+            <span class="s1">headers=headers</span><span class="s0">,</span>
+            <span class="s1">request_url=self._request_url</span><span class="s0">,</span>
+            <span class="s1">data=bytes(data)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">close(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">with </span><span class="s1">self._h2_conn </span><span class="s0">as </span><span class="s1">h2_conn:</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">h2_conn.close_connection()</span>
+                <span class="s0">if </span><span class="s1">data := h2_conn.data_to_send():</span>
+                    <span class="s1">self.sock.sendall(data)</span>
+            <span class="s0">except </span><span class="s1">Exception:</span>
+                <span class="s0">pass</span>
+
+        <span class="s2"># Reset all our HTTP/2 connection state.</span>
+        <span class="s1">self._h2_conn = self._new_h2_conn()</span>
+        <span class="s1">self._h2_stream = </span><span class="s0">None</span>
+        <span class="s1">self._h2_headers = []</span>
+
+        <span class="s1">super().close()</span>
+
+
+<span class="s0">class </span><span class="s1">HTTP2Response(BaseHTTPResponse):</span>
+    <span class="s2"># TODO: This is a woefully incomplete response object, but works for non-streaming.</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">status: int</span><span class="s0">,</span>
+        <span class="s1">headers: HTTPHeaderDict</span><span class="s0">,</span>
+        <span class="s1">request_url: str</span><span class="s0">,</span>
+        <span class="s1">data: bytes</span><span class="s0">,</span>
+        <span class="s1">decode_content: bool = </span><span class="s0">False,  </span><span class="s2"># TODO: support decoding</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__(</span>
+            <span class="s1">status=status</span><span class="s0">,</span>
+            <span class="s1">headers=headers</span><span class="s0">,</span>
+            <span class="s2"># Following CPython, we map HTTP versions to major * 10 + minor integers</span>
+            <span class="s1">version=</span><span class="s5">20</span><span class="s0">,</span>
+            <span class="s2"># No reason phrase in HTTP/2</span>
+            <span class="s1">reason=</span><span class="s0">None,</span>
+            <span class="s1">decode_content=decode_content</span><span class="s0">,</span>
+            <span class="s1">request_url=request_url</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self._data = data</span>
+        <span class="s1">self.length_remaining = </span><span class="s5">0</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">data(self) -&gt; bytes:</span>
+        <span class="s0">return </span><span class="s1">self._data</span>
+
+    <span class="s0">def </span><span class="s1">get_redirect_location(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">close(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">inject_into_urllib3() -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">HTTPSConnectionPool.ConnectionCls = HTTP2Connection</span>
+    <span class="s1">urllib3.connection.HTTPSConnection = HTTP2Connection  </span><span class="s2"># type: ignore[misc]</span>
+
+    <span class="s2"># TODO: Offer 'http/1.1' as well, but for testing purposes this is handy.</span>
+    <span class="s1">urllib3.util.ssl_.ALPN_PROTOCOLS = [</span><span class="s3">&quot;h2&quot;</span><span class="s1">]</span>
+
+
+<span class="s0">def </span><span class="s1">extract_from_urllib3() -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">HTTPSConnectionPool.ConnectionCls = orig_HTTPSConnection</span>
+    <span class="s1">urllib3.connection.HTTPSConnection = orig_HTTPSConnection  </span><span class="s2"># type: ignore[misc]</span>
+
+    <span class="s1">urllib3.util.ssl_.ALPN_PROTOCOLS = [</span><span class="s3">&quot;http/1.1&quot;</span><span class="s1">]</span>
+</pre>
+</body>
+</html>

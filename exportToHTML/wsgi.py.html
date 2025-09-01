@@ -1,0 +1,618 @@
+<html>
+<head>
+<title>wsgi.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6897bb;}
+.s5 { color: #6a8759;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+wsgi.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">io</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">partial</span>
+<span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">update_wrapper</span>
+
+<span class="s0">from </span><span class="s1">.exceptions </span><span class="s0">import </span><span class="s1">ClientDisconnected</span>
+<span class="s0">from </span><span class="s1">.exceptions </span><span class="s0">import </span><span class="s1">RequestEntityTooLarge</span>
+<span class="s0">from </span><span class="s1">.sansio </span><span class="s0">import </span><span class="s1">utils </span><span class="s0">as </span><span class="s1">_sansio_utils</span>
+<span class="s0">from </span><span class="s1">.sansio.utils </span><span class="s0">import </span><span class="s1">host_is_trusted  </span><span class="s2"># noqa: F401 # Imported as part of API</span>
+
+<span class="s0">if </span><span class="s1">t.TYPE_CHECKING:</span>
+    <span class="s0">from </span><span class="s1">_typeshed.wsgi </span><span class="s0">import </span><span class="s1">WSGIApplication</span>
+    <span class="s0">from </span><span class="s1">_typeshed.wsgi </span><span class="s0">import </span><span class="s1">WSGIEnvironment</span>
+
+
+<span class="s0">def </span><span class="s1">responder(f: t.Callable[...</span><span class="s0">, </span><span class="s1">WSGIApplication]) -&gt; WSGIApplication:</span>
+    <span class="s3">&quot;&quot;&quot;Marks a function as responder.  Decorate a function with it and it 
+    will automatically call the return value as WSGI application. 
+ 
+    Example:: 
+ 
+        @responder 
+        def application(environ, start_response): 
+            return Response('Hello World!') 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">update_wrapper(</span><span class="s0">lambda </span><span class="s1">*a: f(*a)(*a[-</span><span class="s4">2</span><span class="s1">:])</span><span class="s0">, </span><span class="s1">f)</span>
+
+
+<span class="s0">def </span><span class="s1">get_current_url(</span>
+    <span class="s1">environ: WSGIEnvironment</span><span class="s0">,</span>
+    <span class="s1">root_only: bool = </span><span class="s0">False,</span>
+    <span class="s1">strip_querystring: bool = </span><span class="s0">False,</span>
+    <span class="s1">host_only: bool = </span><span class="s0">False,</span>
+    <span class="s1">trusted_hosts: t.Iterable[str] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+<span class="s1">) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Recreate the URL for a request from the parts in a WSGI 
+    environment. 
+ 
+    The URL is an IRI, not a URI, so it may contain Unicode characters. 
+    Use :func:`~werkzeug.urls.iri_to_uri` to convert it to ASCII. 
+ 
+    :param environ: The WSGI environment to get the URL parts from. 
+    :param root_only: Only build the root path, don't include the 
+        remaining path or query string. 
+    :param strip_querystring: Don't include the query string. 
+    :param host_only: Only build the scheme and host. 
+    :param trusted_hosts: A list of trusted host names to validate the 
+        host against. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">parts = {</span>
+        <span class="s5">&quot;scheme&quot;</span><span class="s1">: environ[</span><span class="s5">&quot;wsgi.url_scheme&quot;</span><span class="s1">]</span><span class="s0">,</span>
+        <span class="s5">&quot;host&quot;</span><span class="s1">: get_host(environ</span><span class="s0">, </span><span class="s1">trusted_hosts)</span><span class="s0">,</span>
+    <span class="s1">}</span>
+
+    <span class="s0">if not </span><span class="s1">host_only:</span>
+        <span class="s1">parts[</span><span class="s5">&quot;root_path&quot;</span><span class="s1">] = environ.get(</span><span class="s5">&quot;SCRIPT_NAME&quot;</span><span class="s0">, </span><span class="s5">&quot;&quot;</span><span class="s1">)</span>
+
+        <span class="s0">if not </span><span class="s1">root_only:</span>
+            <span class="s1">parts[</span><span class="s5">&quot;path&quot;</span><span class="s1">] = environ.get(</span><span class="s5">&quot;PATH_INFO&quot;</span><span class="s0">, </span><span class="s5">&quot;&quot;</span><span class="s1">)</span>
+
+            <span class="s0">if not </span><span class="s1">strip_querystring:</span>
+                <span class="s1">parts[</span><span class="s5">&quot;query_string&quot;</span><span class="s1">] = environ.get(</span><span class="s5">&quot;QUERY_STRING&quot;</span><span class="s0">, </span><span class="s5">&quot;&quot;</span><span class="s1">).encode(</span><span class="s5">&quot;latin1&quot;</span><span class="s1">)</span>
+
+    <span class="s0">return </span><span class="s1">_sansio_utils.get_current_url(**parts)</span>
+
+
+<span class="s0">def </span><span class="s1">_get_server(</span>
+    <span class="s1">environ: WSGIEnvironment</span><span class="s0">,</span>
+<span class="s1">) -&gt; tuple[str</span><span class="s0">, </span><span class="s1">int | </span><span class="s0">None</span><span class="s1">] | </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">name = environ.get(</span><span class="s5">&quot;SERVER_NAME&quot;</span><span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s1">name </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">port: int | </span><span class="s0">None </span><span class="s1">= int(environ.get(</span><span class="s5">&quot;SERVER_PORT&quot;</span><span class="s0">, None</span><span class="s1">))</span>
+    <span class="s0">except </span><span class="s1">(TypeError</span><span class="s0">, </span><span class="s1">ValueError):</span>
+        <span class="s2"># unix socket</span>
+        <span class="s1">port = </span><span class="s0">None</span>
+
+    <span class="s0">return </span><span class="s1">name</span><span class="s0">, </span><span class="s1">port</span>
+
+
+<span class="s0">def </span><span class="s1">get_host(</span>
+    <span class="s1">environ: WSGIEnvironment</span><span class="s0">, </span><span class="s1">trusted_hosts: t.Iterable[str] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+<span class="s1">) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Return the host for the given WSGI environment. 
+ 
+    The ``Host`` header is preferred, then ``SERVER_NAME`` if it's not 
+    set. The returned host will only contain the port if it is different 
+    than the standard port for the protocol. 
+ 
+    Optionally, verify that the host is trusted using 
+    :func:`host_is_trusted` and raise a 
+    :exc:`~werkzeug.exceptions.SecurityError` if it is not. 
+ 
+    :param environ: A WSGI environment dict. 
+    :param trusted_hosts: A list of trusted host names. 
+ 
+    :return: Host, with port if necessary. 
+    :raise ~werkzeug.exceptions.SecurityError: If the host is not 
+        trusted. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">_sansio_utils.get_host(</span>
+        <span class="s1">environ[</span><span class="s5">&quot;wsgi.url_scheme&quot;</span><span class="s1">]</span><span class="s0">,</span>
+        <span class="s1">environ.get(</span><span class="s5">&quot;HTTP_HOST&quot;</span><span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">_get_server(environ)</span><span class="s0">,</span>
+        <span class="s1">trusted_hosts</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_content_length(environ: WSGIEnvironment) -&gt; int | </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;Return the ``Content-Length`` header value as an int. If the header is not given 
+    or the ``Transfer-Encoding`` header is ``chunked``, ``None`` is returned to indicate 
+    a streaming request. If the value is not an integer, or negative, 0 is returned. 
+ 
+    :param environ: The WSGI environ to get the content length from. 
+ 
+    .. versionadded:: 0.9 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">_sansio_utils.get_content_length(</span>
+        <span class="s1">http_content_length=environ.get(</span><span class="s5">&quot;CONTENT_LENGTH&quot;</span><span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">http_transfer_encoding=environ.get(</span><span class="s5">&quot;HTTP_TRANSFER_ENCODING&quot;</span><span class="s1">)</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">get_input_stream(</span>
+    <span class="s1">environ: WSGIEnvironment</span><span class="s0">,</span>
+    <span class="s1">safe_fallback: bool = </span><span class="s0">True,</span>
+    <span class="s1">max_content_length: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+<span class="s1">) -&gt; t.IO[bytes]:</span>
+    <span class="s3">&quot;&quot;&quot;Return the WSGI input stream, wrapped so that it may be read safely without going 
+    past the ``Content-Length`` header value or ``max_content_length``. 
+ 
+    If ``Content-Length`` exceeds ``max_content_length``, a 
+    :exc:`RequestEntityTooLarge`` ``413 Content Too Large`` error is raised. 
+ 
+    If the WSGI server sets ``environ[&quot;wsgi.input_terminated&quot;]``, it indicates that the 
+    server handles terminating the stream, so it is safe to read directly. For example, 
+    a server that knows how to handle chunked requests safely would set this. 
+ 
+    If ``max_content_length`` is set, it can be enforced on streams if 
+    ``wsgi.input_terminated`` is set. Otherwise, an empty stream is returned unless the 
+    user explicitly disables this safe fallback. 
+ 
+    If the limit is reached before the underlying stream is exhausted (such as a file 
+    that is too large, or an infinite stream), the remaining contents of the stream 
+    cannot be read safely. Depending on how the server handles this, clients may show a 
+    &quot;connection reset&quot; failure instead of seeing the 413 response. 
+ 
+    :param environ: The WSGI environ containing the stream. 
+    :param safe_fallback: Return an empty stream when ``Content-Length`` is not set. 
+        Disabling this allows infinite streams, which can be a denial-of-service risk. 
+    :param max_content_length: The maximum length that content-length or streaming 
+        requests may not exceed. 
+ 
+    .. versionchanged:: 2.3.2 
+        ``max_content_length`` is only applied to streaming requests if the server sets 
+        ``wsgi.input_terminated``. 
+ 
+    .. versionchanged:: 2.3 
+        Check ``max_content_length`` and raise an error if it is exceeded. 
+ 
+    .. versionadded:: 0.9 
+    &quot;&quot;&quot;</span>
+    <span class="s1">stream = t.cast(t.IO[bytes]</span><span class="s0">, </span><span class="s1">environ[</span><span class="s5">&quot;wsgi.input&quot;</span><span class="s1">])</span>
+    <span class="s1">content_length = get_content_length(environ)</span>
+
+    <span class="s0">if </span><span class="s1">content_length </span><span class="s0">is not None and </span><span class="s1">max_content_length </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">content_length &gt; max_content_length:</span>
+            <span class="s0">raise </span><span class="s1">RequestEntityTooLarge()</span>
+
+    <span class="s2"># A WSGI server can set this to indicate that it terminates the input stream. In</span>
+    <span class="s2"># that case the stream is safe without wrapping, or can enforce a max length.</span>
+    <span class="s0">if </span><span class="s5">&quot;wsgi.input_terminated&quot; </span><span class="s0">in </span><span class="s1">environ:</span>
+        <span class="s0">if </span><span class="s1">max_content_length </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s2"># If this is moved above, it can cause the stream to hang if a read attempt</span>
+            <span class="s2"># is made when the client sends no data. For example, the development server</span>
+            <span class="s2"># does not handle buffering except for chunked encoding.</span>
+            <span class="s0">return </span><span class="s1">t.cast(</span>
+                <span class="s1">t.IO[bytes]</span><span class="s0">, </span><span class="s1">LimitedStream(stream</span><span class="s0">, </span><span class="s1">max_content_length</span><span class="s0">, </span><span class="s1">is_max=</span><span class="s0">True</span><span class="s1">)</span>
+            <span class="s1">)</span>
+
+        <span class="s0">return </span><span class="s1">stream</span>
+
+    <span class="s2"># No limit given, return an empty stream unless the user explicitly allows the</span>
+    <span class="s2"># potentially infinite stream. An infinite stream is dangerous if it's not expected,</span>
+    <span class="s2"># as it can tie up a worker indefinitely.</span>
+    <span class="s0">if </span><span class="s1">content_length </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">io.BytesIO() </span><span class="s0">if </span><span class="s1">safe_fallback </span><span class="s0">else </span><span class="s1">stream</span>
+
+    <span class="s0">return </span><span class="s1">t.cast(t.IO[bytes]</span><span class="s0">, </span><span class="s1">LimitedStream(stream</span><span class="s0">, </span><span class="s1">content_length))</span>
+
+
+<span class="s0">def </span><span class="s1">get_path_info(environ: WSGIEnvironment) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Return ``PATH_INFO`` from  the WSGI environment. 
+ 
+    :param environ: WSGI environment to get the path from. 
+ 
+    .. versionchanged:: 3.0 
+        The ``charset`` and ``errors`` parameters were removed. 
+ 
+    .. versionadded:: 0.9 
+    &quot;&quot;&quot;</span>
+    <span class="s1">path: bytes = environ.get(</span><span class="s5">&quot;PATH_INFO&quot;</span><span class="s0">, </span><span class="s5">&quot;&quot;</span><span class="s1">).encode(</span><span class="s5">&quot;latin1&quot;</span><span class="s1">)</span>
+    <span class="s0">return </span><span class="s1">path.decode(errors=</span><span class="s5">&quot;replace&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">ClosingIterator:</span>
+    <span class="s3">&quot;&quot;&quot;The WSGI specification requires that all middlewares and gateways 
+    respect the `close` callback of the iterable returned by the application. 
+    Because it is useful to add another close action to a returned iterable 
+    and adding a custom iterable is a boring task this class can be used for 
+    that:: 
+ 
+        return ClosingIterator(app(environ, start_response), [cleanup_session, 
+                                                              cleanup_locals]) 
+ 
+    If there is just one close function it can be passed instead of the list. 
+ 
+    A closing iterator is not needed if the application uses response objects 
+    and finishes the processing if the response is started:: 
+ 
+        try: 
+            return response(environ, start_response) 
+        finally: 
+            cleanup_session() 
+            cleanup_locals() 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">iterable: t.Iterable[bytes]</span><span class="s0">,</span>
+        <span class="s1">callbacks: </span><span class="s0">None</span>
+        <span class="s1">| (t.Callable[[]</span><span class="s0">, None</span><span class="s1">] | t.Iterable[t.Callable[[]</span><span class="s0">, None</span><span class="s1">]]) = </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">iterator = iter(iterable)</span>
+        <span class="s1">self._next = t.cast(t.Callable[[]</span><span class="s0">, </span><span class="s1">bytes]</span><span class="s0">, </span><span class="s1">partial(next</span><span class="s0">, </span><span class="s1">iterator))</span>
+        <span class="s0">if </span><span class="s1">callbacks </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">callbacks = []</span>
+        <span class="s0">elif </span><span class="s1">callable(callbacks):</span>
+            <span class="s1">callbacks = [callbacks]</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">callbacks = list(callbacks)</span>
+        <span class="s1">iterable_close = getattr(iterable</span><span class="s0">, </span><span class="s5">&quot;close&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">iterable_close:</span>
+            <span class="s1">callbacks.insert(</span><span class="s4">0</span><span class="s0">, </span><span class="s1">iterable_close)</span>
+        <span class="s1">self._callbacks = callbacks</span>
+
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; ClosingIterator:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__next__(self) -&gt; bytes:</span>
+        <span class="s0">return </span><span class="s1">self._next()</span>
+
+    <span class="s0">def </span><span class="s1">close(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">for </span><span class="s1">callback </span><span class="s0">in </span><span class="s1">self._callbacks:</span>
+            <span class="s1">callback()</span>
+
+
+<span class="s0">def </span><span class="s1">wrap_file(</span>
+    <span class="s1">environ: WSGIEnvironment</span><span class="s0">, </span><span class="s1">file: t.IO[bytes]</span><span class="s0">, </span><span class="s1">buffer_size: int = </span><span class="s4">8192</span>
+<span class="s1">) -&gt; t.Iterable[bytes]:</span>
+    <span class="s3">&quot;&quot;&quot;Wraps a file.  This uses the WSGI server's file wrapper if available 
+    or otherwise the generic :class:`FileWrapper`. 
+ 
+    .. versionadded:: 0.5 
+ 
+    If the file wrapper from the WSGI server is used it's important to not 
+    iterate over it from inside the application but to pass it through 
+    unchanged.  If you want to pass out a file wrapper inside a response 
+    object you have to set :attr:`Response.direct_passthrough` to `True`. 
+ 
+    More information about file wrappers are available in :pep:`333`. 
+ 
+    :param file: a :class:`file`-like object with a :meth:`~file.read` method. 
+    :param buffer_size: number of bytes for one iteration. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">environ.get(</span><span class="s5">&quot;wsgi.file_wrapper&quot;</span><span class="s0">, </span><span class="s1">FileWrapper)(  </span><span class="s2"># type: ignore</span>
+        <span class="s1">file</span><span class="s0">, </span><span class="s1">buffer_size</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">FileWrapper:</span>
+    <span class="s3">&quot;&quot;&quot;This class can be used to convert a :class:`file`-like object into 
+    an iterable.  It yields `buffer_size` blocks until the file is fully 
+    read. 
+ 
+    You should not use this class directly but rather use the 
+    :func:`wrap_file` function that uses the WSGI server's file wrapper 
+    support if it's available. 
+ 
+    .. versionadded:: 0.5 
+ 
+    If you're using this object together with a :class:`Response` you have 
+    to use the `direct_passthrough` mode. 
+ 
+    :param file: a :class:`file`-like object with a :meth:`~file.read` method. 
+    :param buffer_size: number of bytes for one iteration. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">file: t.IO[bytes]</span><span class="s0">, </span><span class="s1">buffer_size: int = </span><span class="s4">8192</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.file = file</span>
+        <span class="s1">self.buffer_size = buffer_size</span>
+
+    <span class="s0">def </span><span class="s1">close(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">hasattr(self.file</span><span class="s0">, </span><span class="s5">&quot;close&quot;</span><span class="s1">):</span>
+            <span class="s1">self.file.close()</span>
+
+    <span class="s0">def </span><span class="s1">seekable(self) -&gt; bool:</span>
+        <span class="s0">if </span><span class="s1">hasattr(self.file</span><span class="s0">, </span><span class="s5">&quot;seekable&quot;</span><span class="s1">):</span>
+            <span class="s0">return </span><span class="s1">self.file.seekable()</span>
+        <span class="s0">if </span><span class="s1">hasattr(self.file</span><span class="s0">, </span><span class="s5">&quot;seek&quot;</span><span class="s1">):</span>
+            <span class="s0">return True</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">def </span><span class="s1">seek(self</span><span class="s0">, </span><span class="s1">*args: t.Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">hasattr(self.file</span><span class="s0">, </span><span class="s5">&quot;seek&quot;</span><span class="s1">):</span>
+            <span class="s1">self.file.seek(*args)</span>
+
+    <span class="s0">def </span><span class="s1">tell(self) -&gt; int | </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">hasattr(self.file</span><span class="s0">, </span><span class="s5">&quot;tell&quot;</span><span class="s1">):</span>
+            <span class="s0">return </span><span class="s1">self.file.tell()</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; FileWrapper:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">__next__(self) -&gt; bytes:</span>
+        <span class="s1">data = self.file.read(self.buffer_size)</span>
+        <span class="s0">if </span><span class="s1">data:</span>
+            <span class="s0">return </span><span class="s1">data</span>
+        <span class="s0">raise </span><span class="s1">StopIteration()</span>
+
+
+<span class="s0">class </span><span class="s1">_RangeWrapper:</span>
+    <span class="s2"># private for now, but should we make it public in the future ?</span>
+
+    <span class="s3">&quot;&quot;&quot;This class can be used to convert an iterable object into 
+    an iterable that will only yield a piece of the underlying content. 
+    It yields blocks until the underlying stream range is fully read. 
+    The yielded blocks will have a size that can't exceed the original 
+    iterator defined block size, but that can be smaller. 
+ 
+    If you're using this object together with a :class:`Response` you have 
+    to use the `direct_passthrough` mode. 
+ 
+    :param iterable: an iterable object with a :meth:`__next__` method. 
+    :param start_byte: byte from which read will start. 
+    :param byte_range: how many bytes to read. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">iterable: t.Iterable[bytes] | t.IO[bytes]</span><span class="s0">,</span>
+        <span class="s1">start_byte: int = </span><span class="s4">0</span><span class="s0">,</span>
+        <span class="s1">byte_range: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">):</span>
+        <span class="s1">self.iterable = iter(iterable)</span>
+        <span class="s1">self.byte_range = byte_range</span>
+        <span class="s1">self.start_byte = start_byte</span>
+        <span class="s1">self.end_byte = </span><span class="s0">None</span>
+
+        <span class="s0">if </span><span class="s1">byte_range </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.end_byte = start_byte + byte_range</span>
+
+        <span class="s1">self.read_length = </span><span class="s4">0</span>
+        <span class="s1">self.seekable = hasattr(iterable</span><span class="s0">, </span><span class="s5">&quot;seekable&quot;</span><span class="s1">) </span><span class="s0">and </span><span class="s1">iterable.seekable()</span>
+        <span class="s1">self.end_reached = </span><span class="s0">False</span>
+
+    <span class="s0">def </span><span class="s1">__iter__(self) -&gt; _RangeWrapper:</span>
+        <span class="s0">return </span><span class="s1">self</span>
+
+    <span class="s0">def </span><span class="s1">_next_chunk(self) -&gt; bytes:</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">chunk = next(self.iterable)</span>
+            <span class="s1">self.read_length += len(chunk)</span>
+            <span class="s0">return </span><span class="s1">chunk</span>
+        <span class="s0">except </span><span class="s1">StopIteration:</span>
+            <span class="s1">self.end_reached = </span><span class="s0">True</span>
+            <span class="s0">raise</span>
+
+    <span class="s0">def </span><span class="s1">_first_iteration(self) -&gt; tuple[bytes | </span><span class="s0">None, </span><span class="s1">int]:</span>
+        <span class="s1">chunk = </span><span class="s0">None</span>
+        <span class="s0">if </span><span class="s1">self.seekable:</span>
+            <span class="s1">self.iterable.seek(self.start_byte)  </span><span class="s2"># type: ignore</span>
+            <span class="s1">self.read_length = self.iterable.tell()  </span><span class="s2"># type: ignore</span>
+            <span class="s1">contextual_read_length = self.read_length</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s0">while </span><span class="s1">self.read_length &lt;= self.start_byte:</span>
+                <span class="s1">chunk = self._next_chunk()</span>
+            <span class="s0">if </span><span class="s1">chunk </span><span class="s0">is not None</span><span class="s1">:</span>
+                <span class="s1">chunk = chunk[self.start_byte - self.read_length :]</span>
+            <span class="s1">contextual_read_length = self.start_byte</span>
+        <span class="s0">return </span><span class="s1">chunk</span><span class="s0">, </span><span class="s1">contextual_read_length</span>
+
+    <span class="s0">def </span><span class="s1">_next(self) -&gt; bytes:</span>
+        <span class="s0">if </span><span class="s1">self.end_reached:</span>
+            <span class="s0">raise </span><span class="s1">StopIteration()</span>
+        <span class="s1">chunk = </span><span class="s0">None</span>
+        <span class="s1">contextual_read_length = self.read_length</span>
+        <span class="s0">if </span><span class="s1">self.read_length == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">chunk</span><span class="s0">, </span><span class="s1">contextual_read_length = self._first_iteration()</span>
+        <span class="s0">if </span><span class="s1">chunk </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">chunk = self._next_chunk()</span>
+        <span class="s0">if </span><span class="s1">self.end_byte </span><span class="s0">is not None and </span><span class="s1">self.read_length &gt;= self.end_byte:</span>
+            <span class="s1">self.end_reached = </span><span class="s0">True</span>
+            <span class="s0">return </span><span class="s1">chunk[: self.end_byte - contextual_read_length]</span>
+        <span class="s0">return </span><span class="s1">chunk</span>
+
+    <span class="s0">def </span><span class="s1">__next__(self) -&gt; bytes:</span>
+        <span class="s1">chunk = self._next()</span>
+        <span class="s0">if </span><span class="s1">chunk:</span>
+            <span class="s0">return </span><span class="s1">chunk</span>
+        <span class="s1">self.end_reached = </span><span class="s0">True</span>
+        <span class="s0">raise </span><span class="s1">StopIteration()</span>
+
+    <span class="s0">def </span><span class="s1">close(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">hasattr(self.iterable</span><span class="s0">, </span><span class="s5">&quot;close&quot;</span><span class="s1">):</span>
+            <span class="s1">self.iterable.close()</span>
+
+
+<span class="s0">class </span><span class="s1">LimitedStream(io.RawIOBase):</span>
+    <span class="s3">&quot;&quot;&quot;Wrap a stream so that it doesn't read more than a given limit. This is used to 
+    limit ``wsgi.input`` to the ``Content-Length`` header value or 
+    :attr:`.Request.max_content_length`. 
+ 
+    When attempting to read after the limit has been reached, :meth:`on_exhausted` is 
+    called. When the limit is a maximum, this raises :exc:`.RequestEntityTooLarge`. 
+ 
+    If reading from the stream returns zero bytes or raises an error, 
+    :meth:`on_disconnect` is called, which raises :exc:`.ClientDisconnected`. When the 
+    limit is a maximum and zero bytes were read, no error is raised, since it may be the 
+    end of the stream. 
+ 
+    If the limit is reached before the underlying stream is exhausted (such as a file 
+    that is too large, or an infinite stream), the remaining contents of the stream 
+    cannot be read safely. Depending on how the server handles this, clients may show a 
+    &quot;connection reset&quot; failure instead of seeing the 413 response. 
+ 
+    :param stream: The stream to read from. Must be a readable binary IO object. 
+    :param limit: The limit in bytes to not read past. Should be either the 
+        ``Content-Length`` header value or ``request.max_content_length``. 
+    :param is_max: Whether the given ``limit`` is ``request.max_content_length`` instead 
+        of the ``Content-Length`` header value. This changes how exhausted and 
+        disconnect events are handled. 
+ 
+    .. versionchanged:: 2.3 
+        Handle ``max_content_length`` differently than ``Content-Length``. 
+ 
+    .. versionchanged:: 2.3 
+        Implements ``io.RawIOBase`` rather than ``io.IOBase``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">stream: t.IO[bytes]</span><span class="s0">, </span><span class="s1">limit: int</span><span class="s0">, </span><span class="s1">is_max: bool = </span><span class="s0">False</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._stream = stream</span>
+        <span class="s1">self._pos = </span><span class="s4">0</span>
+        <span class="s1">self.limit = limit</span>
+        <span class="s1">self._limit_is_max = is_max</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">is_exhausted(self) -&gt; bool:</span>
+        <span class="s3">&quot;&quot;&quot;Whether the current stream position has reached the limit.&quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self._pos &gt;= self.limit</span>
+
+    <span class="s0">def </span><span class="s1">on_exhausted(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s3">&quot;&quot;&quot;Called when attempting to read after the limit has been reached. 
+ 
+        The default behavior is to do nothing, unless the limit is a maximum, in which 
+        case it raises :exc:`.RequestEntityTooLarge`. 
+ 
+        .. versionchanged:: 2.3 
+            Raises ``RequestEntityTooLarge`` if the limit is a maximum. 
+ 
+        .. versionchanged:: 2.3 
+            Any return value is ignored. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self._limit_is_max:</span>
+            <span class="s0">raise </span><span class="s1">RequestEntityTooLarge()</span>
+
+    <span class="s0">def </span><span class="s1">on_disconnect(self</span><span class="s0">, </span><span class="s1">error: Exception | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s3">&quot;&quot;&quot;Called when an attempted read receives zero bytes before the limit was 
+        reached. This indicates that the client disconnected before sending the full 
+        request body. 
+ 
+        The default behavior is to raise :exc:`.ClientDisconnected`, unless the limit is 
+        a maximum and no error was raised. 
+ 
+        .. versionchanged:: 2.3 
+            Added the ``error`` parameter. Do nothing if the limit is a maximum and no 
+            error was raised. 
+ 
+        .. versionchanged:: 2.3 
+            Any return value is ignored. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self._limit_is_max </span><span class="s0">or </span><span class="s1">error </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">raise </span><span class="s1">ClientDisconnected()</span>
+
+        <span class="s2"># If the limit is a maximum, then we may have read zero bytes because the</span>
+        <span class="s2"># streaming body is complete. There's no way to distinguish that from the</span>
+        <span class="s2"># client disconnecting early.</span>
+
+    <span class="s0">def </span><span class="s1">exhaust(self) -&gt; bytes:</span>
+        <span class="s3">&quot;&quot;&quot;Exhaust the stream by reading until the limit is reached or the client 
+        disconnects, returning the remaining data. 
+ 
+        .. versionchanged:: 2.3 
+            Return the remaining data. 
+ 
+        .. versionchanged:: 2.2.3 
+            Handle case where wrapped stream returns fewer bytes than requested. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self.is_exhausted:</span>
+            <span class="s0">return </span><span class="s1">self.readall()</span>
+
+        <span class="s0">return </span><span class="s6">b&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">readinto(self</span><span class="s0">, </span><span class="s1">b: bytearray) -&gt; int | </span><span class="s0">None</span><span class="s1">:  </span><span class="s2"># type: ignore[override]</span>
+        <span class="s1">size = len(b)</span>
+        <span class="s1">remaining = self.limit - self._pos</span>
+
+        <span class="s0">if </span><span class="s1">remaining &lt;= </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">self.on_exhausted()</span>
+            <span class="s0">return </span><span class="s4">0</span>
+
+        <span class="s0">if </span><span class="s1">hasattr(self._stream</span><span class="s0">, </span><span class="s5">&quot;readinto&quot;</span><span class="s1">):</span>
+            <span class="s2"># Use stream.readinto if it's available.</span>
+            <span class="s0">if </span><span class="s1">size &lt;= remaining:</span>
+                <span class="s2"># The size fits in the remaining limit, use the buffer directly.</span>
+                <span class="s0">try</span><span class="s1">:</span>
+                    <span class="s1">out_size: int | </span><span class="s0">None </span><span class="s1">= self._stream.readinto(b)</span>
+                <span class="s0">except </span><span class="s1">(OSError</span><span class="s0">, </span><span class="s1">ValueError) </span><span class="s0">as </span><span class="s1">e:</span>
+                    <span class="s1">self.on_disconnect(error=e)</span>
+                    <span class="s0">return </span><span class="s4">0</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s2"># Use a temp buffer with the remaining limit as the size.</span>
+                <span class="s1">temp_b = bytearray(remaining)</span>
+
+                <span class="s0">try</span><span class="s1">:</span>
+                    <span class="s1">out_size = self._stream.readinto(temp_b)</span>
+                <span class="s0">except </span><span class="s1">(OSError</span><span class="s0">, </span><span class="s1">ValueError) </span><span class="s0">as </span><span class="s1">e:</span>
+                    <span class="s1">self.on_disconnect(error=e)</span>
+                    <span class="s0">return </span><span class="s4">0</span>
+
+                <span class="s0">if </span><span class="s1">out_size:</span>
+                    <span class="s1">b[:out_size] = temp_b</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s2"># WSGI requires that stream.read is available.</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">data = self._stream.read(min(size</span><span class="s0">, </span><span class="s1">remaining))</span>
+            <span class="s0">except </span><span class="s1">(OSError</span><span class="s0">, </span><span class="s1">ValueError) </span><span class="s0">as </span><span class="s1">e:</span>
+                <span class="s1">self.on_disconnect(error=e)</span>
+                <span class="s0">return </span><span class="s4">0</span>
+
+            <span class="s1">out_size = len(data)</span>
+            <span class="s1">b[:out_size] = data</span>
+
+        <span class="s0">if not </span><span class="s1">out_size:</span>
+            <span class="s2"># Read zero bytes from the stream.</span>
+            <span class="s1">self.on_disconnect()</span>
+            <span class="s0">return </span><span class="s4">0</span>
+
+        <span class="s1">self._pos += out_size</span>
+        <span class="s0">return </span><span class="s1">out_size</span>
+
+    <span class="s0">def </span><span class="s1">readall(self) -&gt; bytes:</span>
+        <span class="s0">if </span><span class="s1">self.is_exhausted:</span>
+            <span class="s1">self.on_exhausted()</span>
+            <span class="s0">return </span><span class="s6">b&quot;&quot;</span>
+
+        <span class="s1">out = bytearray()</span>
+
+        <span class="s2"># The parent implementation uses &quot;while True&quot;, which results in an extra read.</span>
+        <span class="s0">while not </span><span class="s1">self.is_exhausted:</span>
+            <span class="s1">data = self.read(</span><span class="s4">1024 </span><span class="s1">* </span><span class="s4">64</span><span class="s1">)</span>
+
+            <span class="s2"># Stream may return empty before a max limit is reached.</span>
+            <span class="s0">if not </span><span class="s1">data:</span>
+                <span class="s0">break</span>
+
+            <span class="s1">out.extend(data)</span>
+
+        <span class="s0">return </span><span class="s1">bytes(out)</span>
+
+    <span class="s0">def </span><span class="s1">tell(self) -&gt; int:</span>
+        <span class="s3">&quot;&quot;&quot;Return the current stream position. 
+ 
+        .. versionadded:: 0.9 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self._pos</span>
+
+    <span class="s0">def </span><span class="s1">readable(self) -&gt; bool:</span>
+        <span class="s0">return True</span>
+</pre>
+</body>
+</html>

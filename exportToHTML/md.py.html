@@ -1,0 +1,637 @@
+<html>
+<head>
+<title>md.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #808080;}
+.s4 { color: #6897bb;}
+.s5 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+md.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">lru_cache</span>
+<span class="s0">from </span><span class="s1">logging </span><span class="s0">import </span><span class="s1">getLogger</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">List</span><span class="s0">, </span><span class="s1">Optional</span>
+
+<span class="s0">from </span><span class="s1">.constant </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">COMMON_SAFE_ASCII_CHARACTERS</span><span class="s0">,</span>
+    <span class="s1">TRACE</span><span class="s0">,</span>
+    <span class="s1">UNICODE_SECONDARY_RANGE_KEYWORD</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">.utils </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">is_accentuated</span><span class="s0">,</span>
+    <span class="s1">is_arabic</span><span class="s0">,</span>
+    <span class="s1">is_arabic_isolated_form</span><span class="s0">,</span>
+    <span class="s1">is_case_variable</span><span class="s0">,</span>
+    <span class="s1">is_cjk</span><span class="s0">,</span>
+    <span class="s1">is_emoticon</span><span class="s0">,</span>
+    <span class="s1">is_hangul</span><span class="s0">,</span>
+    <span class="s1">is_hiragana</span><span class="s0">,</span>
+    <span class="s1">is_katakana</span><span class="s0">,</span>
+    <span class="s1">is_latin</span><span class="s0">,</span>
+    <span class="s1">is_punctuation</span><span class="s0">,</span>
+    <span class="s1">is_separator</span><span class="s0">,</span>
+    <span class="s1">is_symbol</span><span class="s0">,</span>
+    <span class="s1">is_thai</span><span class="s0">,</span>
+    <span class="s1">is_unprintable</span><span class="s0">,</span>
+    <span class="s1">remove_accent</span><span class="s0">,</span>
+    <span class="s1">unicode_range</span><span class="s0">,</span>
+<span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">MessDetectorPlugin:</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Base abstract class used for mess detection plugins. 
+    All detectors MUST extend and implement given methods. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Determine if given character should be fed in. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError  </span><span class="s3"># pragma: nocover</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s2">&quot;&quot;&quot; 
+        The main routine to be executed upon character. 
+        Insert the logic in witch the text would be considered chaotic. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError  </span><span class="s3"># pragma: nocover</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Permit to reset the plugin to the initial state. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s2">&quot;&quot;&quot; 
+        Compute the chaos ratio based on what your feed() has seen. 
+        Must NOT be lower than 0.; No restriction gt 0. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError  </span><span class="s3"># pragma: nocover</span>
+
+
+<span class="s0">class </span><span class="s1">TooManySymbolOrPunctuationPlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._punctuation_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._symbol_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._last_printable_char: Optional[str] = </span><span class="s0">None</span>
+        <span class="s1">self._frenzy_symbol_in_word: bool = </span><span class="s0">False</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return </span><span class="s1">character.isprintable()</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">character != self._last_printable_char</span>
+            <span class="s0">and </span><span class="s1">character </span><span class="s0">not in </span><span class="s1">COMMON_SAFE_ASCII_CHARACTERS</span>
+        <span class="s1">):</span>
+            <span class="s0">if </span><span class="s1">is_punctuation(character):</span>
+                <span class="s1">self._punctuation_count += </span><span class="s4">1</span>
+            <span class="s0">elif </span><span class="s1">(</span>
+                <span class="s1">character.isdigit() </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">is_symbol(character)</span>
+                <span class="s0">and </span><span class="s1">is_emoticon(character) </span><span class="s0">is False</span>
+            <span class="s1">):</span>
+                <span class="s1">self._symbol_count += </span><span class="s4">2</span>
+
+        <span class="s1">self._last_printable_char = character</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._punctuation_count = </span><span class="s4">0</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._symbol_count = </span><span class="s4">0</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s1">ratio_of_punctuation: float = (</span>
+            <span class="s1">self._punctuation_count + self._symbol_count</span>
+        <span class="s1">) / self._character_count</span>
+
+        <span class="s0">return </span><span class="s1">ratio_of_punctuation </span><span class="s0">if </span><span class="s1">ratio_of_punctuation &gt;= </span><span class="s4">0.3 </span><span class="s0">else </span><span class="s4">0.0</span>
+
+
+<span class="s0">class </span><span class="s1">TooManyAccentuatedPlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._accentuated_count: int = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return </span><span class="s1">character.isalpha()</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+
+        <span class="s0">if </span><span class="s1">is_accentuated(character):</span>
+            <span class="s1">self._accentuated_count += </span><span class="s4">1</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._accentuated_count = </span><span class="s4">0</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count &lt; </span><span class="s4">8</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s1">ratio_of_accentuation: float = self._accentuated_count / self._character_count</span>
+        <span class="s0">return </span><span class="s1">ratio_of_accentuation </span><span class="s0">if </span><span class="s1">ratio_of_accentuation &gt;= </span><span class="s4">0.35 </span><span class="s0">else </span><span class="s4">0.0</span>
+
+
+<span class="s0">class </span><span class="s1">UnprintablePlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._unprintable_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">is_unprintable(character):</span>
+            <span class="s1">self._unprintable_count += </span><span class="s4">1</span>
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._unprintable_count = </span><span class="s4">0</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s0">return </span><span class="s1">(self._unprintable_count * </span><span class="s4">8</span><span class="s1">) / self._character_count</span>
+
+
+<span class="s0">class </span><span class="s1">SuspiciousDuplicateAccentPlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._successive_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._last_latin_character: Optional[str] = </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return </span><span class="s1">character.isalpha() </span><span class="s0">and </span><span class="s1">is_latin(character)</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">self._last_latin_character </span><span class="s0">is not None</span>
+            <span class="s0">and </span><span class="s1">is_accentuated(character)</span>
+            <span class="s0">and </span><span class="s1">is_accentuated(self._last_latin_character)</span>
+        <span class="s1">):</span>
+            <span class="s0">if </span><span class="s1">character.isupper() </span><span class="s0">and </span><span class="s1">self._last_latin_character.isupper():</span>
+                <span class="s1">self._successive_count += </span><span class="s4">1</span>
+            <span class="s3"># Worse if its the same char duplicated with different accent.</span>
+            <span class="s0">if </span><span class="s1">remove_accent(character) == remove_accent(self._last_latin_character):</span>
+                <span class="s1">self._successive_count += </span><span class="s4">1</span>
+        <span class="s1">self._last_latin_character = character</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._successive_count = </span><span class="s4">0</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._last_latin_character = </span><span class="s0">None</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s0">return </span><span class="s1">(self._successive_count * </span><span class="s4">2</span><span class="s1">) / self._character_count</span>
+
+
+<span class="s0">class </span><span class="s1">SuspiciousRange(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._suspicious_successive_range_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._last_printable_seen: Optional[str] = </span><span class="s0">None</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return </span><span class="s1">character.isprintable()</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">character.isspace()</span>
+            <span class="s0">or </span><span class="s1">is_punctuation(character)</span>
+            <span class="s0">or </span><span class="s1">character </span><span class="s0">in </span><span class="s1">COMMON_SAFE_ASCII_CHARACTERS</span>
+        <span class="s1">):</span>
+            <span class="s1">self._last_printable_seen = </span><span class="s0">None</span>
+            <span class="s0">return</span>
+
+        <span class="s0">if </span><span class="s1">self._last_printable_seen </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">self._last_printable_seen = character</span>
+            <span class="s0">return</span>
+
+        <span class="s1">unicode_range_a: Optional[str] = unicode_range(self._last_printable_seen)</span>
+        <span class="s1">unicode_range_b: Optional[str] = unicode_range(character)</span>
+
+        <span class="s0">if </span><span class="s1">is_suspiciously_successive_range(unicode_range_a</span><span class="s0">, </span><span class="s1">unicode_range_b):</span>
+            <span class="s1">self._suspicious_successive_range_count += </span><span class="s4">1</span>
+
+        <span class="s1">self._last_printable_seen = character</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._suspicious_successive_range_count = </span><span class="s4">0</span>
+        <span class="s1">self._last_printable_seen = </span><span class="s0">None</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count &lt;= </span><span class="s4">24</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s1">ratio_of_suspicious_range_usage: float = (</span>
+            <span class="s1">self._suspicious_successive_range_count * </span><span class="s4">2</span>
+        <span class="s1">) / self._character_count</span>
+
+        <span class="s0">return </span><span class="s1">ratio_of_suspicious_range_usage</span>
+
+
+<span class="s0">class </span><span class="s1">SuperWeirdWordPlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._word_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._bad_word_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._foreign_long_count: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._is_current_word_bad: bool = </span><span class="s0">False</span>
+        <span class="s1">self._foreign_long_watch: bool = </span><span class="s0">False</span>
+
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._bad_character_count: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._buffer: str = </span><span class="s5">&quot;&quot;</span>
+        <span class="s1">self._buffer_accent_count: int = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">character.isalpha():</span>
+            <span class="s1">self._buffer += character</span>
+            <span class="s0">if </span><span class="s1">is_accentuated(character):</span>
+                <span class="s1">self._buffer_accent_count += </span><span class="s4">1</span>
+            <span class="s0">if </span><span class="s1">(</span>
+                <span class="s1">self._foreign_long_watch </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">(is_latin(character) </span><span class="s0">is False or </span><span class="s1">is_accentuated(character))</span>
+                <span class="s0">and </span><span class="s1">is_cjk(character) </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">is_hangul(character) </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">is_katakana(character) </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">is_hiragana(character) </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">is_thai(character) </span><span class="s0">is False</span>
+            <span class="s1">):</span>
+                <span class="s1">self._foreign_long_watch = </span><span class="s0">True</span>
+            <span class="s0">return</span>
+        <span class="s0">if not </span><span class="s1">self._buffer:</span>
+            <span class="s0">return</span>
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">character.isspace() </span><span class="s0">or </span><span class="s1">is_punctuation(character) </span><span class="s0">or </span><span class="s1">is_separator(character)</span>
+        <span class="s1">) </span><span class="s0">and </span><span class="s1">self._buffer:</span>
+            <span class="s1">self._word_count += </span><span class="s4">1</span>
+            <span class="s1">buffer_length: int = len(self._buffer)</span>
+
+            <span class="s1">self._character_count += buffer_length</span>
+
+            <span class="s0">if </span><span class="s1">buffer_length &gt;= </span><span class="s4">4</span><span class="s1">:</span>
+                <span class="s0">if </span><span class="s1">self._buffer_accent_count / buffer_length &gt; </span><span class="s4">0.34</span><span class="s1">:</span>
+                    <span class="s1">self._is_current_word_bad = </span><span class="s0">True</span>
+                <span class="s3"># Word/Buffer ending with an upper case accentuated letter are so rare,</span>
+                <span class="s3"># that we will consider them all as suspicious. Same weight as foreign_long suspicious.</span>
+                <span class="s0">if </span><span class="s1">(</span>
+                    <span class="s1">is_accentuated(self._buffer[-</span><span class="s4">1</span><span class="s1">])</span>
+                    <span class="s0">and </span><span class="s1">self._buffer[-</span><span class="s4">1</span><span class="s1">].isupper()</span>
+                    <span class="s0">and </span><span class="s1">all(_.isupper() </span><span class="s0">for </span><span class="s1">_ </span><span class="s0">in </span><span class="s1">self._buffer) </span><span class="s0">is False</span>
+                <span class="s1">):</span>
+                    <span class="s1">self._foreign_long_count += </span><span class="s4">1</span>
+                    <span class="s1">self._is_current_word_bad = </span><span class="s0">True</span>
+            <span class="s0">if </span><span class="s1">buffer_length &gt;= </span><span class="s4">24 </span><span class="s0">and </span><span class="s1">self._foreign_long_watch:</span>
+                <span class="s1">camel_case_dst = [</span>
+                    <span class="s1">i</span>
+                    <span class="s0">for </span><span class="s1">c</span><span class="s0">, </span><span class="s1">i </span><span class="s0">in </span><span class="s1">zip(self._buffer</span><span class="s0">, </span><span class="s1">range(</span><span class="s4">0</span><span class="s0">, </span><span class="s1">buffer_length))</span>
+                    <span class="s0">if </span><span class="s1">c.isupper()</span>
+                <span class="s1">]</span>
+                <span class="s1">probable_camel_cased: bool = </span><span class="s0">False</span>
+
+                <span class="s0">if </span><span class="s1">camel_case_dst </span><span class="s0">and </span><span class="s1">(len(camel_case_dst) / buffer_length &lt;= </span><span class="s4">0.3</span><span class="s1">):</span>
+                    <span class="s1">probable_camel_cased = </span><span class="s0">True</span>
+
+                <span class="s0">if not </span><span class="s1">probable_camel_cased:</span>
+                    <span class="s1">self._foreign_long_count += </span><span class="s4">1</span>
+                    <span class="s1">self._is_current_word_bad = </span><span class="s0">True</span>
+
+            <span class="s0">if </span><span class="s1">self._is_current_word_bad:</span>
+                <span class="s1">self._bad_word_count += </span><span class="s4">1</span>
+                <span class="s1">self._bad_character_count += len(self._buffer)</span>
+                <span class="s1">self._is_current_word_bad = </span><span class="s0">False</span>
+
+            <span class="s1">self._foreign_long_watch = </span><span class="s0">False</span>
+            <span class="s1">self._buffer = </span><span class="s5">&quot;&quot;</span>
+            <span class="s1">self._buffer_accent_count = </span><span class="s4">0</span>
+        <span class="s0">elif </span><span class="s1">(</span>
+            <span class="s1">character </span><span class="s0">not in </span><span class="s1">{</span><span class="s5">&quot;&lt;&quot;</span><span class="s0">, </span><span class="s5">&quot;&gt;&quot;</span><span class="s0">, </span><span class="s5">&quot;-&quot;</span><span class="s0">, </span><span class="s5">&quot;=&quot;</span><span class="s0">, </span><span class="s5">&quot;~&quot;</span><span class="s0">, </span><span class="s5">&quot;|&quot;</span><span class="s0">, </span><span class="s5">&quot;_&quot;</span><span class="s1">}</span>
+            <span class="s0">and </span><span class="s1">character.isdigit() </span><span class="s0">is False</span>
+            <span class="s0">and </span><span class="s1">is_symbol(character)</span>
+        <span class="s1">):</span>
+            <span class="s1">self._is_current_word_bad = </span><span class="s0">True</span>
+            <span class="s1">self._buffer += character</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._buffer = </span><span class="s5">&quot;&quot;</span>
+        <span class="s1">self._is_current_word_bad = </span><span class="s0">False</span>
+        <span class="s1">self._foreign_long_watch = </span><span class="s0">False</span>
+        <span class="s1">self._bad_word_count = </span><span class="s4">0</span>
+        <span class="s1">self._word_count = </span><span class="s4">0</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._bad_character_count = </span><span class="s4">0</span>
+        <span class="s1">self._foreign_long_count = </span><span class="s4">0</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._word_count &lt;= </span><span class="s4">10 </span><span class="s0">and </span><span class="s1">self._foreign_long_count == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s0">return </span><span class="s1">self._bad_character_count / self._character_count</span>
+
+
+<span class="s0">class </span><span class="s1">CjkInvalidStopPlugin(MessDetectorPlugin):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    GB(Chinese) based encoding often render the stop incorrectly when the content does not fit and 
+    can be easily detected. Searching for the overuse of '丅' and '丄'. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._wrong_stop_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._cjk_character_count: int = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">character </span><span class="s0">in </span><span class="s1">{</span><span class="s5">&quot;丅&quot;</span><span class="s0">, </span><span class="s5">&quot;丄&quot;</span><span class="s1">}:</span>
+            <span class="s1">self._wrong_stop_count += </span><span class="s4">1</span>
+            <span class="s0">return</span>
+        <span class="s0">if </span><span class="s1">is_cjk(character):</span>
+            <span class="s1">self._cjk_character_count += </span><span class="s4">1</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._wrong_stop_count = </span><span class="s4">0</span>
+        <span class="s1">self._cjk_character_count = </span><span class="s4">0</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._cjk_character_count &lt; </span><span class="s4">16</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+        <span class="s0">return </span><span class="s1">self._wrong_stop_count / self._cjk_character_count</span>
+
+
+<span class="s0">class </span><span class="s1">ArchaicUpperLowerPlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._buf: bool = </span><span class="s0">False</span>
+
+        <span class="s1">self._character_count_since_last_sep: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._successive_upper_lower_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._successive_upper_lower_count_final: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+
+        <span class="s1">self._last_alpha_seen: Optional[str] = </span><span class="s0">None</span>
+        <span class="s1">self._current_ascii_only: bool = </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">is_concerned = character.isalpha() </span><span class="s0">and </span><span class="s1">is_case_variable(character)</span>
+        <span class="s1">chunk_sep = is_concerned </span><span class="s0">is False</span>
+
+        <span class="s0">if </span><span class="s1">chunk_sep </span><span class="s0">and </span><span class="s1">self._character_count_since_last_sep &gt; </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s0">if </span><span class="s1">(</span>
+                <span class="s1">self._character_count_since_last_sep &lt;= </span><span class="s4">64</span>
+                <span class="s0">and </span><span class="s1">character.isdigit() </span><span class="s0">is False</span>
+                <span class="s0">and </span><span class="s1">self._current_ascii_only </span><span class="s0">is False</span>
+            <span class="s1">):</span>
+                <span class="s1">self._successive_upper_lower_count_final += (</span>
+                    <span class="s1">self._successive_upper_lower_count</span>
+                <span class="s1">)</span>
+
+            <span class="s1">self._successive_upper_lower_count = </span><span class="s4">0</span>
+            <span class="s1">self._character_count_since_last_sep = </span><span class="s4">0</span>
+            <span class="s1">self._last_alpha_seen = </span><span class="s0">None</span>
+            <span class="s1">self._buf = </span><span class="s0">False</span>
+            <span class="s1">self._character_count += </span><span class="s4">1</span>
+            <span class="s1">self._current_ascii_only = </span><span class="s0">True</span>
+
+            <span class="s0">return</span>
+
+        <span class="s0">if </span><span class="s1">self._current_ascii_only </span><span class="s0">is True and </span><span class="s1">character.isascii() </span><span class="s0">is False</span><span class="s1">:</span>
+            <span class="s1">self._current_ascii_only = </span><span class="s0">False</span>
+
+        <span class="s0">if </span><span class="s1">self._last_alpha_seen </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">if </span><span class="s1">(character.isupper() </span><span class="s0">and </span><span class="s1">self._last_alpha_seen.islower()) </span><span class="s0">or </span><span class="s1">(</span>
+                <span class="s1">character.islower() </span><span class="s0">and </span><span class="s1">self._last_alpha_seen.isupper()</span>
+            <span class="s1">):</span>
+                <span class="s0">if </span><span class="s1">self._buf </span><span class="s0">is True</span><span class="s1">:</span>
+                    <span class="s1">self._successive_upper_lower_count += </span><span class="s4">2</span>
+                    <span class="s1">self._buf = </span><span class="s0">False</span>
+                <span class="s0">else</span><span class="s1">:</span>
+                    <span class="s1">self._buf = </span><span class="s0">True</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">self._buf = </span><span class="s0">False</span>
+
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+        <span class="s1">self._character_count_since_last_sep += </span><span class="s4">1</span>
+        <span class="s1">self._last_alpha_seen = character</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._character_count_since_last_sep = </span><span class="s4">0</span>
+        <span class="s1">self._successive_upper_lower_count = </span><span class="s4">0</span>
+        <span class="s1">self._successive_upper_lower_count_final = </span><span class="s4">0</span>
+        <span class="s1">self._last_alpha_seen = </span><span class="s0">None</span>
+        <span class="s1">self._buf = </span><span class="s0">False</span>
+        <span class="s1">self._current_ascii_only = </span><span class="s0">True</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s0">return </span><span class="s1">self._successive_upper_lower_count_final / self._character_count</span>
+
+
+<span class="s0">class </span><span class="s1">ArabicIsolatedFormPlugin(MessDetectorPlugin):</span>
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count: int = </span><span class="s4">0</span>
+        <span class="s1">self._isolated_form_count: int = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">reset(self) -&gt; </span><span class="s0">None</span><span class="s1">:  </span><span class="s3"># pragma: no cover</span>
+        <span class="s1">self._character_count = </span><span class="s4">0</span>
+        <span class="s1">self._isolated_form_count = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">eligible(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; bool:</span>
+        <span class="s0">return </span><span class="s1">is_arabic(character)</span>
+
+    <span class="s0">def </span><span class="s1">feed(self</span><span class="s0">, </span><span class="s1">character: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._character_count += </span><span class="s4">1</span>
+
+        <span class="s0">if </span><span class="s1">is_arabic_isolated_form(character):</span>
+            <span class="s1">self._isolated_form_count += </span><span class="s4">1</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">ratio(self) -&gt; float:</span>
+        <span class="s0">if </span><span class="s1">self._character_count &lt; </span><span class="s4">8</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">0.0</span>
+
+        <span class="s1">isolated_form_usage: float = self._isolated_form_count / self._character_count</span>
+
+        <span class="s0">return </span><span class="s1">isolated_form_usage</span>
+
+
+<span class="s1">@lru_cache(maxsize=</span><span class="s4">1024</span><span class="s1">)</span>
+<span class="s0">def </span><span class="s1">is_suspiciously_successive_range(</span>
+    <span class="s1">unicode_range_a: Optional[str]</span><span class="s0">, </span><span class="s1">unicode_range_b: Optional[str]</span>
+<span class="s1">) -&gt; bool:</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Determine if two Unicode range seen next to each other can be considered as suspicious. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">unicode_range_a </span><span class="s0">is None or </span><span class="s1">unicode_range_b </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">if </span><span class="s1">unicode_range_a == unicode_range_b:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">if </span><span class="s5">&quot;Latin&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">and </span><span class="s5">&quot;Latin&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">if </span><span class="s5">&quot;Emoticons&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;Emoticons&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b:</span>
+        <span class="s0">return False</span>
+
+    <span class="s3"># Latin characters can be accompanied with a combining diacritical mark</span>
+    <span class="s3"># eg. Vietnamese.</span>
+    <span class="s0">if </span><span class="s1">(</span><span class="s5">&quot;Latin&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;Latin&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b) </span><span class="s0">and </span><span class="s1">(</span>
+        <span class="s5">&quot;Combining&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;Combining&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b</span>
+    <span class="s1">):</span>
+        <span class="s0">return False</span>
+
+    <span class="s1">keywords_range_a</span><span class="s0">, </span><span class="s1">keywords_range_b = unicode_range_a.split(</span>
+        <span class="s5">&quot; &quot;</span>
+    <span class="s1">)</span><span class="s0">, </span><span class="s1">unicode_range_b.split(</span><span class="s5">&quot; &quot;</span><span class="s1">)</span>
+
+    <span class="s0">for </span><span class="s1">el </span><span class="s0">in </span><span class="s1">keywords_range_a:</span>
+        <span class="s0">if </span><span class="s1">el </span><span class="s0">in </span><span class="s1">UNICODE_SECONDARY_RANGE_KEYWORD:</span>
+            <span class="s0">continue</span>
+        <span class="s0">if </span><span class="s1">el </span><span class="s0">in </span><span class="s1">keywords_range_b:</span>
+            <span class="s0">return False</span>
+
+    <span class="s3"># Japanese Exception</span>
+    <span class="s1">range_a_jp_chars</span><span class="s0">, </span><span class="s1">range_b_jp_chars = (</span>
+        <span class="s1">unicode_range_a</span>
+        <span class="s0">in </span><span class="s1">(</span>
+            <span class="s5">&quot;Hiragana&quot;</span><span class="s0">,</span>
+            <span class="s5">&quot;Katakana&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">unicode_range_b </span><span class="s0">in </span><span class="s1">(</span><span class="s5">&quot;Hiragana&quot;</span><span class="s0">, </span><span class="s5">&quot;Katakana&quot;</span><span class="s1">)</span><span class="s0">,</span>
+    <span class="s1">)</span>
+    <span class="s0">if </span><span class="s1">(range_a_jp_chars </span><span class="s0">or </span><span class="s1">range_b_jp_chars) </span><span class="s0">and </span><span class="s1">(</span>
+        <span class="s5">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b</span>
+    <span class="s1">):</span>
+        <span class="s0">return False</span>
+    <span class="s0">if </span><span class="s1">range_a_jp_chars </span><span class="s0">and </span><span class="s1">range_b_jp_chars:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">if </span><span class="s5">&quot;Hangul&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;Hangul&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b:</span>
+        <span class="s0">if </span><span class="s5">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b:</span>
+            <span class="s0">return False</span>
+        <span class="s0">if </span><span class="s1">unicode_range_a == </span><span class="s5">&quot;Basic Latin&quot; </span><span class="s0">or </span><span class="s1">unicode_range_b == </span><span class="s5">&quot;Basic Latin&quot;</span><span class="s1">:</span>
+            <span class="s0">return False</span>
+
+    <span class="s3"># Chinese/Japanese use dedicated range for punctuation and/or separators.</span>
+    <span class="s0">if </span><span class="s1">(</span><span class="s5">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b) </span><span class="s0">or </span><span class="s1">(</span>
+        <span class="s1">unicode_range_a </span><span class="s0">in </span><span class="s1">[</span><span class="s5">&quot;Katakana&quot;</span><span class="s0">, </span><span class="s5">&quot;Hiragana&quot;</span><span class="s1">]</span>
+        <span class="s0">and </span><span class="s1">unicode_range_b </span><span class="s0">in </span><span class="s1">[</span><span class="s5">&quot;Katakana&quot;</span><span class="s0">, </span><span class="s5">&quot;Hiragana&quot;</span><span class="s1">]</span>
+    <span class="s1">):</span>
+        <span class="s0">if </span><span class="s5">&quot;Punctuation&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;Punctuation&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b:</span>
+            <span class="s0">return False</span>
+        <span class="s0">if </span><span class="s5">&quot;Forms&quot; </span><span class="s0">in </span><span class="s1">unicode_range_a </span><span class="s0">or </span><span class="s5">&quot;Forms&quot; </span><span class="s0">in </span><span class="s1">unicode_range_b:</span>
+            <span class="s0">return False</span>
+        <span class="s0">if </span><span class="s1">unicode_range_a == </span><span class="s5">&quot;Basic Latin&quot; </span><span class="s0">or </span><span class="s1">unicode_range_b == </span><span class="s5">&quot;Basic Latin&quot;</span><span class="s1">:</span>
+            <span class="s0">return False</span>
+
+    <span class="s0">return True</span>
+
+
+<span class="s1">@lru_cache(maxsize=</span><span class="s4">2048</span><span class="s1">)</span>
+<span class="s0">def </span><span class="s1">mess_ratio(</span>
+    <span class="s1">decoded_sequence: str</span><span class="s0">, </span><span class="s1">maximum_threshold: float = </span><span class="s4">0.2</span><span class="s0">, </span><span class="s1">debug: bool = </span><span class="s0">False</span>
+<span class="s1">) -&gt; float:</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Compute a mess ratio given a decoded bytes sequence. The maximum threshold does stop the computation earlier. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">detectors: List[MessDetectorPlugin] = [</span>
+        <span class="s1">md_class() </span><span class="s0">for </span><span class="s1">md_class </span><span class="s0">in </span><span class="s1">MessDetectorPlugin.__subclasses__()</span>
+    <span class="s1">]</span>
+
+    <span class="s1">length: int = len(decoded_sequence) + </span><span class="s4">1</span>
+
+    <span class="s1">mean_mess_ratio: float = </span><span class="s4">0.0</span>
+
+    <span class="s0">if </span><span class="s1">length &lt; </span><span class="s4">512</span><span class="s1">:</span>
+        <span class="s1">intermediary_mean_mess_ratio_calc: int = </span><span class="s4">32</span>
+    <span class="s0">elif </span><span class="s1">length &lt;= </span><span class="s4">1024</span><span class="s1">:</span>
+        <span class="s1">intermediary_mean_mess_ratio_calc = </span><span class="s4">64</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">intermediary_mean_mess_ratio_calc = </span><span class="s4">128</span>
+
+    <span class="s0">for </span><span class="s1">character</span><span class="s0">, </span><span class="s1">index </span><span class="s0">in </span><span class="s1">zip(decoded_sequence + </span><span class="s5">&quot;</span><span class="s0">\n</span><span class="s5">&quot;</span><span class="s0">, </span><span class="s1">range(length)):</span>
+        <span class="s0">for </span><span class="s1">detector </span><span class="s0">in </span><span class="s1">detectors:</span>
+            <span class="s0">if </span><span class="s1">detector.eligible(character):</span>
+                <span class="s1">detector.feed(character)</span>
+
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">index &gt; </span><span class="s4">0 </span><span class="s0">and </span><span class="s1">index % intermediary_mean_mess_ratio_calc == </span><span class="s4">0</span>
+        <span class="s1">) </span><span class="s0">or </span><span class="s1">index == length - </span><span class="s4">1</span><span class="s1">:</span>
+            <span class="s1">mean_mess_ratio = sum(dt.ratio </span><span class="s0">for </span><span class="s1">dt </span><span class="s0">in </span><span class="s1">detectors)</span>
+
+            <span class="s0">if </span><span class="s1">mean_mess_ratio &gt;= maximum_threshold:</span>
+                <span class="s0">break</span>
+
+    <span class="s0">if </span><span class="s1">debug:</span>
+        <span class="s1">logger = getLogger(</span><span class="s5">&quot;charset_normalizer&quot;</span><span class="s1">)</span>
+
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s5">&quot;Mess-detector extended-analysis start. &quot;</span>
+            <span class="s5">f&quot;intermediary_mean_mess_ratio_calc=</span><span class="s0">{</span><span class="s1">intermediary_mean_mess_ratio_calc</span><span class="s0">} </span><span class="s5">mean_mess_ratio=</span><span class="s0">{</span><span class="s1">mean_mess_ratio</span><span class="s0">} </span><span class="s5">&quot;</span>
+            <span class="s5">f&quot;maximum_threshold=</span><span class="s0">{</span><span class="s1">maximum_threshold</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">len(decoded_sequence) &gt; </span><span class="s4">16</span><span class="s1">:</span>
+            <span class="s1">logger.log(TRACE</span><span class="s0">, </span><span class="s5">f&quot;Starting with: </span><span class="s0">{</span><span class="s1">decoded_sequence[:</span><span class="s4">16</span><span class="s1">]</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s1">)</span>
+            <span class="s1">logger.log(TRACE</span><span class="s0">, </span><span class="s5">f&quot;Ending with: </span><span class="s0">{</span><span class="s1">decoded_sequence[-</span><span class="s4">16</span><span class="s1">::]</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s1">)</span>
+
+        <span class="s0">for </span><span class="s1">dt </span><span class="s0">in </span><span class="s1">detectors:  </span><span class="s3"># pragma: nocover</span>
+            <span class="s1">logger.log(TRACE</span><span class="s0">, </span><span class="s5">f&quot;</span><span class="s0">{</span><span class="s1">dt.__class__</span><span class="s0">}</span><span class="s5">: </span><span class="s0">{</span><span class="s1">dt.ratio</span><span class="s0">}</span><span class="s5">&quot;</span><span class="s1">)</span>
+
+    <span class="s0">return </span><span class="s1">round(mean_mess_ratio</span><span class="s0">, </span><span class="s4">3</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

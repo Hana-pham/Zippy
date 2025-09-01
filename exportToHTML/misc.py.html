@@ -1,0 +1,757 @@
+<html>
+<head>
+<title>misc.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6897bb;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+misc.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">contextlib</span>
+<span class="s0">import </span><span class="s1">errno</span>
+<span class="s0">import </span><span class="s1">getpass</span>
+<span class="s0">import </span><span class="s1">hashlib</span>
+<span class="s0">import </span><span class="s1">io</span>
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">posixpath</span>
+<span class="s0">import </span><span class="s1">shutil</span>
+<span class="s0">import </span><span class="s1">stat</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">sysconfig</span>
+<span class="s0">import </span><span class="s1">urllib.parse</span>
+<span class="s0">from </span><span class="s1">io </span><span class="s0">import </span><span class="s1">StringIO</span>
+<span class="s0">from </span><span class="s1">itertools </span><span class="s0">import </span><span class="s1">filterfalse</span><span class="s0">, </span><span class="s1">tee</span><span class="s0">, </span><span class="s1">zip_longest</span>
+<span class="s0">from </span><span class="s1">types </span><span class="s0">import </span><span class="s1">TracebackType</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">Any</span><span class="s0">,</span>
+    <span class="s1">BinaryIO</span><span class="s0">,</span>
+    <span class="s1">Callable</span><span class="s0">,</span>
+    <span class="s1">ContextManager</span><span class="s0">,</span>
+    <span class="s1">Dict</span><span class="s0">,</span>
+    <span class="s1">Generator</span><span class="s0">,</span>
+    <span class="s1">Iterable</span><span class="s0">,</span>
+    <span class="s1">Iterator</span><span class="s0">,</span>
+    <span class="s1">List</span><span class="s0">,</span>
+    <span class="s1">Optional</span><span class="s0">,</span>
+    <span class="s1">TextIO</span><span class="s0">,</span>
+    <span class="s1">Tuple</span><span class="s0">,</span>
+    <span class="s1">Type</span><span class="s0">,</span>
+    <span class="s1">TypeVar</span><span class="s0">,</span>
+    <span class="s1">Union</span><span class="s0">,</span>
+    <span class="s1">cast</span><span class="s0">,</span>
+<span class="s1">)</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.pyproject_hooks </span><span class="s0">import </span><span class="s1">BuildBackendHookCaller</span>
+<span class="s0">from </span><span class="s1">pip._vendor.tenacity </span><span class="s0">import </span><span class="s1">retry</span><span class="s0">, </span><span class="s1">stop_after_delay</span><span class="s0">, </span><span class="s1">wait_fixed</span>
+
+<span class="s0">from </span><span class="s1">pip </span><span class="s0">import </span><span class="s1">__version__</span>
+<span class="s0">from </span><span class="s1">pip._internal.exceptions </span><span class="s0">import </span><span class="s1">CommandError</span><span class="s0">, </span><span class="s1">ExternallyManagedEnvironment</span>
+<span class="s0">from </span><span class="s1">pip._internal.locations </span><span class="s0">import </span><span class="s1">get_major_minor_version</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.compat </span><span class="s0">import </span><span class="s1">WINDOWS</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.virtualenv </span><span class="s0">import </span><span class="s1">running_under_virtualenv</span>
+
+<span class="s1">__all__ = [</span>
+    <span class="s2">&quot;rmtree&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;display_path&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;backup_dir&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;ask&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;splitext&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;format_size&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;is_installable_dir&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;normalize_path&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;renames&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;get_prog&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;captured_stdout&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;ensure_dir&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;remove_auth_from_url&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;check_externally_managed&quot;</span><span class="s0">,</span>
+    <span class="s2">&quot;ConfiguredBuildBackendHookCaller&quot;</span><span class="s0">,</span>
+<span class="s1">]</span>
+
+<span class="s1">logger = logging.getLogger(__name__)</span>
+
+<span class="s1">T = TypeVar(</span><span class="s2">&quot;T&quot;</span><span class="s1">)</span>
+<span class="s1">ExcInfo = Tuple[Type[BaseException]</span><span class="s0">, </span><span class="s1">BaseException</span><span class="s0">, </span><span class="s1">TracebackType]</span>
+<span class="s1">VersionInfo = Tuple[int</span><span class="s0">, </span><span class="s1">int</span><span class="s0">, </span><span class="s1">int]</span>
+<span class="s1">NetlocTuple = Tuple[str</span><span class="s0">, </span><span class="s1">Tuple[Optional[str]</span><span class="s0">, </span><span class="s1">Optional[str]]]</span>
+
+
+<span class="s0">def </span><span class="s1">get_pip_version() -&gt; str:</span>
+    <span class="s1">pip_pkg_dir = os.path.join(os.path.dirname(__file__)</span><span class="s0">, </span><span class="s2">&quot;..&quot;</span><span class="s0">, </span><span class="s2">&quot;..&quot;</span><span class="s1">)</span>
+    <span class="s1">pip_pkg_dir = os.path.abspath(pip_pkg_dir)</span>
+
+    <span class="s0">return </span><span class="s2">&quot;pip {} from {} (python {})&quot;</span><span class="s1">.format(</span>
+        <span class="s1">__version__</span><span class="s0">,</span>
+        <span class="s1">pip_pkg_dir</span><span class="s0">,</span>
+        <span class="s1">get_major_minor_version()</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">normalize_version_info(py_version_info: Tuple[int</span><span class="s0">, </span><span class="s1">...]) -&gt; Tuple[int</span><span class="s0">, </span><span class="s1">int</span><span class="s0">, </span><span class="s1">int]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Convert a tuple of ints representing a Python version to one of length 
+    three. 
+ 
+    :param py_version_info: a tuple of ints representing a Python version, 
+        or None to specify no version. The tuple can have any length. 
+ 
+    :return: a tuple of length three if `py_version_info` is non-None. 
+        Otherwise, return `py_version_info` unchanged (i.e. None). 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">len(py_version_info) &lt; </span><span class="s4">3</span><span class="s1">:</span>
+        <span class="s1">py_version_info += (</span><span class="s4">3 </span><span class="s1">- len(py_version_info)) * (</span><span class="s4">0</span><span class="s0">,</span><span class="s1">)</span>
+    <span class="s0">elif </span><span class="s1">len(py_version_info) &gt; </span><span class="s4">3</span><span class="s1">:</span>
+        <span class="s1">py_version_info = py_version_info[:</span><span class="s4">3</span><span class="s1">]</span>
+
+    <span class="s0">return </span><span class="s1">cast(</span><span class="s2">&quot;VersionInfo&quot;</span><span class="s0">, </span><span class="s1">py_version_info)</span>
+
+
+<span class="s0">def </span><span class="s1">ensure_dir(path: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;os.path.makedirs without EEXIST.&quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">os.makedirs(path)</span>
+    <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">e:</span>
+        <span class="s5"># Windows can raise spurious ENOTEMPTY errors. See #6426.</span>
+        <span class="s0">if </span><span class="s1">e.errno != errno.EEXIST </span><span class="s0">and </span><span class="s1">e.errno != errno.ENOTEMPTY:</span>
+            <span class="s0">raise</span>
+
+
+<span class="s0">def </span><span class="s1">get_prog() -&gt; str:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">prog = os.path.basename(sys.argv[</span><span class="s4">0</span><span class="s1">])</span>
+        <span class="s0">if </span><span class="s1">prog </span><span class="s0">in </span><span class="s1">(</span><span class="s2">&quot;__main__.py&quot;</span><span class="s0">, </span><span class="s2">&quot;-c&quot;</span><span class="s1">):</span>
+            <span class="s0">return </span><span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">sys.executable</span><span class="s0">} </span><span class="s2">-m pip&quot;</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">prog</span>
+    <span class="s0">except </span><span class="s1">(AttributeError</span><span class="s0">, </span><span class="s1">TypeError</span><span class="s0">, </span><span class="s1">IndexError):</span>
+        <span class="s0">pass</span>
+    <span class="s0">return </span><span class="s2">&quot;pip&quot;</span>
+
+
+<span class="s5"># Retry every half second for up to 3 seconds</span>
+<span class="s5"># Tenacity raises RetryError by default, explicitly raise the original exception</span>
+<span class="s1">@retry(reraise=</span><span class="s0">True, </span><span class="s1">stop=stop_after_delay(</span><span class="s4">3</span><span class="s1">)</span><span class="s0">, </span><span class="s1">wait=wait_fixed(</span><span class="s4">0.5</span><span class="s1">))</span>
+<span class="s0">def </span><span class="s1">rmtree(dir: str</span><span class="s0">, </span><span class="s1">ignore_errors: bool = </span><span class="s0">False</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s0">if </span><span class="s1">sys.version_info &gt;= (</span><span class="s4">3</span><span class="s0">, </span><span class="s4">12</span><span class="s1">):</span>
+        <span class="s1">shutil.rmtree(dir</span><span class="s0">, </span><span class="s1">ignore_errors=ignore_errors</span><span class="s0">, </span><span class="s1">onexc=rmtree_errorhandler)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">shutil.rmtree(dir</span><span class="s0">, </span><span class="s1">ignore_errors=ignore_errors</span><span class="s0">, </span><span class="s1">onerror=rmtree_errorhandler)</span>
+
+
+<span class="s0">def </span><span class="s1">rmtree_errorhandler(</span>
+    <span class="s1">func: Callable[...</span><span class="s0">, </span><span class="s1">Any]</span><span class="s0">, </span><span class="s1">path: str</span><span class="s0">, </span><span class="s1">exc_info: Union[ExcInfo</span><span class="s0">, </span><span class="s1">BaseException]</span>
+<span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;On Windows, the files in .svn are read-only, so when rmtree() tries to 
+    remove them, an exception is thrown.  We catch that here, remove the 
+    read-only attribute, and hopefully continue without problems.&quot;&quot;&quot;</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">has_attr_readonly = </span><span class="s0">not </span><span class="s1">(os.stat(path).st_mode &amp; stat.S_IWRITE)</span>
+    <span class="s0">except </span><span class="s1">OSError:</span>
+        <span class="s5"># it's equivalent to os.path.exists</span>
+        <span class="s0">return</span>
+
+    <span class="s0">if </span><span class="s1">has_attr_readonly:</span>
+        <span class="s5"># convert to read/write</span>
+        <span class="s1">os.chmod(path</span><span class="s0">, </span><span class="s1">stat.S_IWRITE)</span>
+        <span class="s5"># use the original function to repeat the operation</span>
+        <span class="s1">func(path)</span>
+        <span class="s0">return</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s0">raise</span>
+
+
+<span class="s0">def </span><span class="s1">display_path(path: str) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Gives the display value for a given path, making it relative to cwd 
+    if possible.&quot;&quot;&quot;</span>
+    <span class="s1">path = os.path.normcase(os.path.abspath(path))</span>
+    <span class="s0">if </span><span class="s1">path.startswith(os.getcwd() + os.path.sep):</span>
+        <span class="s1">path = </span><span class="s2">&quot;.&quot; </span><span class="s1">+ path[len(os.getcwd()) :]</span>
+    <span class="s0">return </span><span class="s1">path</span>
+
+
+<span class="s0">def </span><span class="s1">backup_dir(dir: str</span><span class="s0">, </span><span class="s1">ext: str = </span><span class="s2">&quot;.bak&quot;</span><span class="s1">) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Figure out the name of a directory to back up the given dir to 
+    (adding .bak, .bak2, etc)&quot;&quot;&quot;</span>
+    <span class="s1">n = </span><span class="s4">1</span>
+    <span class="s1">extension = ext</span>
+    <span class="s0">while </span><span class="s1">os.path.exists(dir + extension):</span>
+        <span class="s1">n += </span><span class="s4">1</span>
+        <span class="s1">extension = ext + str(n)</span>
+    <span class="s0">return </span><span class="s1">dir + extension</span>
+
+
+<span class="s0">def </span><span class="s1">ask_path_exists(message: str</span><span class="s0">, </span><span class="s1">options: Iterable[str]) -&gt; str:</span>
+    <span class="s0">for </span><span class="s1">action </span><span class="s0">in </span><span class="s1">os.environ.get(</span><span class="s2">&quot;PIP_EXISTS_ACTION&quot;</span><span class="s0">, </span><span class="s2">&quot;&quot;</span><span class="s1">).split():</span>
+        <span class="s0">if </span><span class="s1">action </span><span class="s0">in </span><span class="s1">options:</span>
+            <span class="s0">return </span><span class="s1">action</span>
+    <span class="s0">return </span><span class="s1">ask(message</span><span class="s0">, </span><span class="s1">options)</span>
+
+
+<span class="s0">def </span><span class="s1">_check_no_input(message: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;Raise an error if no input is allowed.&quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">os.environ.get(</span><span class="s2">&quot;PIP_NO_INPUT&quot;</span><span class="s1">):</span>
+        <span class="s0">raise </span><span class="s1">Exception(</span>
+            <span class="s2">f&quot;No input was expected ($PIP_NO_INPUT set); question: </span><span class="s0">{</span><span class="s1">message</span><span class="s0">}</span><span class="s2">&quot;</span>
+        <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">ask(message: str</span><span class="s0">, </span><span class="s1">options: Iterable[str]) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Ask the message interactively, with the given possible responses&quot;&quot;&quot;</span>
+    <span class="s0">while </span><span class="s4">1</span><span class="s1">:</span>
+        <span class="s1">_check_no_input(message)</span>
+        <span class="s1">response = input(message)</span>
+        <span class="s1">response = response.strip().lower()</span>
+        <span class="s0">if </span><span class="s1">response </span><span class="s0">not in </span><span class="s1">options:</span>
+            <span class="s1">print(</span>
+                <span class="s2">&quot;Your response ({!r}) was not one of the expected responses: &quot;</span>
+                <span class="s2">&quot;{}&quot;</span><span class="s1">.format(response</span><span class="s0">, </span><span class="s2">&quot;, &quot;</span><span class="s1">.join(options))</span>
+            <span class="s1">)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">response</span>
+
+
+<span class="s0">def </span><span class="s1">ask_input(message: str) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Ask for input interactively.&quot;&quot;&quot;</span>
+    <span class="s1">_check_no_input(message)</span>
+    <span class="s0">return </span><span class="s1">input(message)</span>
+
+
+<span class="s0">def </span><span class="s1">ask_password(message: str) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Ask for a password interactively.&quot;&quot;&quot;</span>
+    <span class="s1">_check_no_input(message)</span>
+    <span class="s0">return </span><span class="s1">getpass.getpass(message)</span>
+
+
+<span class="s0">def </span><span class="s1">strtobool(val: str) -&gt; int:</span>
+    <span class="s3">&quot;&quot;&quot;Convert a string representation of truth to true (1) or false (0). 
+ 
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values 
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if 
+    'val' is anything else. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">val = val.lower()</span>
+    <span class="s0">if </span><span class="s1">val </span><span class="s0">in </span><span class="s1">(</span><span class="s2">&quot;y&quot;</span><span class="s0">, </span><span class="s2">&quot;yes&quot;</span><span class="s0">, </span><span class="s2">&quot;t&quot;</span><span class="s0">, </span><span class="s2">&quot;true&quot;</span><span class="s0">, </span><span class="s2">&quot;on&quot;</span><span class="s0">, </span><span class="s2">&quot;1&quot;</span><span class="s1">):</span>
+        <span class="s0">return </span><span class="s4">1</span>
+    <span class="s0">elif </span><span class="s1">val </span><span class="s0">in </span><span class="s1">(</span><span class="s2">&quot;n&quot;</span><span class="s0">, </span><span class="s2">&quot;no&quot;</span><span class="s0">, </span><span class="s2">&quot;f&quot;</span><span class="s0">, </span><span class="s2">&quot;false&quot;</span><span class="s0">, </span><span class="s2">&quot;off&quot;</span><span class="s0">, </span><span class="s2">&quot;0&quot;</span><span class="s1">):</span>
+        <span class="s0">return </span><span class="s4">0</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError(</span><span class="s2">f&quot;invalid truth value </span><span class="s0">{</span><span class="s1">val</span><span class="s0">!r}</span><span class="s2">&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">format_size(bytes: float) -&gt; str:</span>
+    <span class="s0">if </span><span class="s1">bytes &gt; </span><span class="s4">1000 </span><span class="s1">* </span><span class="s4">1000</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s2">&quot;{:.1f} MB&quot;</span><span class="s1">.format(bytes / </span><span class="s4">1000.0 </span><span class="s1">/ </span><span class="s4">1000</span><span class="s1">)</span>
+    <span class="s0">elif </span><span class="s1">bytes &gt; </span><span class="s4">10 </span><span class="s1">* </span><span class="s4">1000</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s2">&quot;{} kB&quot;</span><span class="s1">.format(int(bytes / </span><span class="s4">1000</span><span class="s1">))</span>
+    <span class="s0">elif </span><span class="s1">bytes &gt; </span><span class="s4">1000</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s2">&quot;{:.1f} kB&quot;</span><span class="s1">.format(bytes / </span><span class="s4">1000.0</span><span class="s1">)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s2">&quot;{} bytes&quot;</span><span class="s1">.format(int(bytes))</span>
+
+
+<span class="s0">def </span><span class="s1">tabulate(rows: Iterable[Iterable[Any]]) -&gt; Tuple[List[str]</span><span class="s0">, </span><span class="s1">List[int]]:</span>
+    <span class="s3">&quot;&quot;&quot;Return a list of formatted rows and a list of column sizes. 
+ 
+    For example:: 
+ 
+    &gt;&gt;&gt; tabulate([['foobar', 2000], [0xdeadbeef]]) 
+    (['foobar     2000', '3735928559'], [10, 4]) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">rows = [tuple(map(str</span><span class="s0">, </span><span class="s1">row)) </span><span class="s0">for </span><span class="s1">row </span><span class="s0">in </span><span class="s1">rows]</span>
+    <span class="s1">sizes = [max(map(len</span><span class="s0">, </span><span class="s1">col)) </span><span class="s0">for </span><span class="s1">col </span><span class="s0">in </span><span class="s1">zip_longest(*rows</span><span class="s0">, </span><span class="s1">fillvalue=</span><span class="s2">&quot;&quot;</span><span class="s1">)]</span>
+    <span class="s1">table = [</span><span class="s2">&quot; &quot;</span><span class="s1">.join(map(str.ljust</span><span class="s0">, </span><span class="s1">row</span><span class="s0">, </span><span class="s1">sizes)).rstrip() </span><span class="s0">for </span><span class="s1">row </span><span class="s0">in </span><span class="s1">rows]</span>
+    <span class="s0">return </span><span class="s1">table</span><span class="s0">, </span><span class="s1">sizes</span>
+
+
+<span class="s0">def </span><span class="s1">is_installable_dir(path: str) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;Is path is a directory containing pyproject.toml or setup.py? 
+ 
+    If pyproject.toml exists, this is a PEP 517 project. Otherwise we look for 
+    a legacy setuptools layout by identifying setup.py. We don't check for the 
+    setup.cfg because using it without setup.py is only available for PEP 517 
+    projects, which are already covered by the pyproject.toml check. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if not </span><span class="s1">os.path.isdir(path):</span>
+        <span class="s0">return False</span>
+    <span class="s0">if </span><span class="s1">os.path.isfile(os.path.join(path</span><span class="s0">, </span><span class="s2">&quot;pyproject.toml&quot;</span><span class="s1">)):</span>
+        <span class="s0">return True</span>
+    <span class="s0">if </span><span class="s1">os.path.isfile(os.path.join(path</span><span class="s0">, </span><span class="s2">&quot;setup.py&quot;</span><span class="s1">)):</span>
+        <span class="s0">return True</span>
+    <span class="s0">return False</span>
+
+
+<span class="s0">def </span><span class="s1">read_chunks(</span>
+    <span class="s1">file: BinaryIO</span><span class="s0">, </span><span class="s1">size: int = io.DEFAULT_BUFFER_SIZE</span>
+<span class="s1">) -&gt; Generator[bytes</span><span class="s0">, None, None</span><span class="s1">]:</span>
+    <span class="s3">&quot;&quot;&quot;Yield pieces of data from a file-like object until EOF.&quot;&quot;&quot;</span>
+    <span class="s0">while True</span><span class="s1">:</span>
+        <span class="s1">chunk = file.read(size)</span>
+        <span class="s0">if not </span><span class="s1">chunk:</span>
+            <span class="s0">break</span>
+        <span class="s0">yield </span><span class="s1">chunk</span>
+
+
+<span class="s0">def </span><span class="s1">normalize_path(path: str</span><span class="s0">, </span><span class="s1">resolve_symlinks: bool = </span><span class="s0">True</span><span class="s1">) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Convert a path to its canonical, case-normalized, absolute version. 
+ 
+    &quot;&quot;&quot;</span>
+    <span class="s1">path = os.path.expanduser(path)</span>
+    <span class="s0">if </span><span class="s1">resolve_symlinks:</span>
+        <span class="s1">path = os.path.realpath(path)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">path = os.path.abspath(path)</span>
+    <span class="s0">return </span><span class="s1">os.path.normcase(path)</span>
+
+
+<span class="s0">def </span><span class="s1">splitext(path: str) -&gt; Tuple[str</span><span class="s0">, </span><span class="s1">str]:</span>
+    <span class="s3">&quot;&quot;&quot;Like os.path.splitext, but take off .tar too&quot;&quot;&quot;</span>
+    <span class="s1">base</span><span class="s0">, </span><span class="s1">ext = posixpath.splitext(path)</span>
+    <span class="s0">if </span><span class="s1">base.lower().endswith(</span><span class="s2">&quot;.tar&quot;</span><span class="s1">):</span>
+        <span class="s1">ext = base[-</span><span class="s4">4</span><span class="s1">:] + ext</span>
+        <span class="s1">base = base[:-</span><span class="s4">4</span><span class="s1">]</span>
+    <span class="s0">return </span><span class="s1">base</span><span class="s0">, </span><span class="s1">ext</span>
+
+
+<span class="s0">def </span><span class="s1">renames(old: str</span><span class="s0">, </span><span class="s1">new: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;Like os.renames(), but handles renaming across devices.&quot;&quot;&quot;</span>
+    <span class="s5"># Implementation borrowed from os.renames().</span>
+    <span class="s1">head</span><span class="s0">, </span><span class="s1">tail = os.path.split(new)</span>
+    <span class="s0">if </span><span class="s1">head </span><span class="s0">and </span><span class="s1">tail </span><span class="s0">and not </span><span class="s1">os.path.exists(head):</span>
+        <span class="s1">os.makedirs(head)</span>
+
+    <span class="s1">shutil.move(old</span><span class="s0">, </span><span class="s1">new)</span>
+
+    <span class="s1">head</span><span class="s0">, </span><span class="s1">tail = os.path.split(old)</span>
+    <span class="s0">if </span><span class="s1">head </span><span class="s0">and </span><span class="s1">tail:</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">os.removedirs(head)</span>
+        <span class="s0">except </span><span class="s1">OSError:</span>
+            <span class="s0">pass</span>
+
+
+<span class="s0">def </span><span class="s1">is_local(path: str) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Return True if path is within sys.prefix, if we're running in a virtualenv. 
+ 
+    If we're not in a virtualenv, all paths are considered &quot;local.&quot; 
+ 
+    Caution: this function assumes the head of path has been normalized 
+    with normalize_path. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if not </span><span class="s1">running_under_virtualenv():</span>
+        <span class="s0">return True</span>
+    <span class="s0">return </span><span class="s1">path.startswith(normalize_path(sys.prefix))</span>
+
+
+<span class="s0">def </span><span class="s1">write_output(msg: Any</span><span class="s0">, </span><span class="s1">*args: Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">logger.info(msg</span><span class="s0">, </span><span class="s1">*args)</span>
+
+
+<span class="s0">class </span><span class="s1">StreamWrapper(StringIO):</span>
+    <span class="s1">orig_stream: TextIO</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">from_stream(cls</span><span class="s0">, </span><span class="s1">orig_stream: TextIO) -&gt; </span><span class="s2">&quot;StreamWrapper&quot;</span><span class="s1">:</span>
+        <span class="s1">ret = cls()</span>
+        <span class="s1">ret.orig_stream = orig_stream</span>
+        <span class="s0">return </span><span class="s1">ret</span>
+
+    <span class="s5"># compileall.compile_dir() needs stdout.encoding to print to stdout</span>
+    <span class="s5"># type ignore is because TextIOBase.encoding is writeable</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">encoding(self) -&gt; str:  </span><span class="s5"># type: ignore</span>
+        <span class="s0">return </span><span class="s1">self.orig_stream.encoding</span>
+
+
+<span class="s1">@contextlib.contextmanager</span>
+<span class="s0">def </span><span class="s1">captured_output(stream_name: str) -&gt; Generator[StreamWrapper</span><span class="s0">, None, None</span><span class="s1">]:</span>
+    <span class="s3">&quot;&quot;&quot;Return a context manager used by captured_stdout/stdin/stderr 
+    that temporarily replaces the sys stream *stream_name* with a StringIO. 
+ 
+    Taken from Lib/support/__init__.py in the CPython repo. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">orig_stdout = getattr(sys</span><span class="s0">, </span><span class="s1">stream_name)</span>
+    <span class="s1">setattr(sys</span><span class="s0">, </span><span class="s1">stream_name</span><span class="s0">, </span><span class="s1">StreamWrapper.from_stream(orig_stdout))</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s0">yield </span><span class="s1">getattr(sys</span><span class="s0">, </span><span class="s1">stream_name)</span>
+    <span class="s0">finally</span><span class="s1">:</span>
+        <span class="s1">setattr(sys</span><span class="s0">, </span><span class="s1">stream_name</span><span class="s0">, </span><span class="s1">orig_stdout)</span>
+
+
+<span class="s0">def </span><span class="s1">captured_stdout() -&gt; ContextManager[StreamWrapper]:</span>
+    <span class="s3">&quot;&quot;&quot;Capture the output of sys.stdout: 
+ 
+       with captured_stdout() as stdout: 
+           print('hello') 
+       self.assertEqual(stdout.getvalue(), 'hello\n') 
+ 
+    Taken from Lib/support/__init__.py in the CPython repo. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">captured_output(</span><span class="s2">&quot;stdout&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">captured_stderr() -&gt; ContextManager[StreamWrapper]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    See captured_stdout(). 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">captured_output(</span><span class="s2">&quot;stderr&quot;</span><span class="s1">)</span>
+
+
+<span class="s5"># Simulates an enum</span>
+<span class="s0">def </span><span class="s1">enum(*sequential: Any</span><span class="s0">, </span><span class="s1">**named: Any) -&gt; Type[Any]:</span>
+    <span class="s1">enums = dict(zip(sequential</span><span class="s0">, </span><span class="s1">range(len(sequential)))</span><span class="s0">, </span><span class="s1">**named)</span>
+    <span class="s1">reverse = {value: key </span><span class="s0">for </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value </span><span class="s0">in </span><span class="s1">enums.items()}</span>
+    <span class="s1">enums[</span><span class="s2">&quot;reverse_mapping&quot;</span><span class="s1">] = reverse</span>
+    <span class="s0">return </span><span class="s1">type(</span><span class="s2">&quot;Enum&quot;</span><span class="s0">, </span><span class="s1">()</span><span class="s0">, </span><span class="s1">enums)</span>
+
+
+<span class="s0">def </span><span class="s1">build_netloc(host: str</span><span class="s0">, </span><span class="s1">port: Optional[int]) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Build a netloc from a host-port pair 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">port </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">host</span>
+    <span class="s0">if </span><span class="s2">&quot;:&quot; </span><span class="s0">in </span><span class="s1">host:</span>
+        <span class="s5"># Only wrap host with square brackets when it is IPv6</span>
+        <span class="s1">host = </span><span class="s2">f&quot;[</span><span class="s0">{</span><span class="s1">host</span><span class="s0">}</span><span class="s2">]&quot;</span>
+    <span class="s0">return </span><span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">host</span><span class="s0">}</span><span class="s2">:</span><span class="s0">{</span><span class="s1">port</span><span class="s0">}</span><span class="s2">&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">build_url_from_netloc(netloc: str</span><span class="s0">, </span><span class="s1">scheme: str = </span><span class="s2">&quot;https&quot;</span><span class="s1">) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Build a full URL from a netloc. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">netloc.count(</span><span class="s2">&quot;:&quot;</span><span class="s1">) &gt;= </span><span class="s4">2 </span><span class="s0">and </span><span class="s2">&quot;@&quot; </span><span class="s0">not in </span><span class="s1">netloc </span><span class="s0">and </span><span class="s2">&quot;[&quot; </span><span class="s0">not in </span><span class="s1">netloc:</span>
+        <span class="s5"># It must be a bare IPv6 address, so wrap it with brackets.</span>
+        <span class="s1">netloc = </span><span class="s2">f&quot;[</span><span class="s0">{</span><span class="s1">netloc</span><span class="s0">}</span><span class="s2">]&quot;</span>
+    <span class="s0">return </span><span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">scheme</span><span class="s0">}</span><span class="s2">://</span><span class="s0">{</span><span class="s1">netloc</span><span class="s0">}</span><span class="s2">&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">parse_netloc(netloc: str) -&gt; Tuple[Optional[str]</span><span class="s0">, </span><span class="s1">Optional[int]]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Return the host-port pair from a netloc. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">url = build_url_from_netloc(netloc)</span>
+    <span class="s1">parsed = urllib.parse.urlparse(url)</span>
+    <span class="s0">return </span><span class="s1">parsed.hostname</span><span class="s0">, </span><span class="s1">parsed.port</span>
+
+
+<span class="s0">def </span><span class="s1">split_auth_from_netloc(netloc: str) -&gt; NetlocTuple:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Parse out and remove the auth information from a netloc. 
+ 
+    Returns: (netloc, (username, password)). 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s2">&quot;@&quot; </span><span class="s0">not in </span><span class="s1">netloc:</span>
+        <span class="s0">return </span><span class="s1">netloc</span><span class="s0">, </span><span class="s1">(</span><span class="s0">None, None</span><span class="s1">)</span>
+
+    <span class="s5"># Split from the right because that's how urllib.parse.urlsplit()</span>
+    <span class="s5"># behaves if more than one @ is present (which can be checked using</span>
+    <span class="s5"># the password attribute of urlsplit()'s return value).</span>
+    <span class="s1">auth</span><span class="s0">, </span><span class="s1">netloc = netloc.rsplit(</span><span class="s2">&quot;@&quot;</span><span class="s0">, </span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">pw: Optional[str] = </span><span class="s0">None</span>
+    <span class="s0">if </span><span class="s2">&quot;:&quot; </span><span class="s0">in </span><span class="s1">auth:</span>
+        <span class="s5"># Split from the left because that's how urllib.parse.urlsplit()</span>
+        <span class="s5"># behaves if more than one : is present (which again can be checked</span>
+        <span class="s5"># using the password attribute of the return value)</span>
+        <span class="s1">user</span><span class="s0">, </span><span class="s1">pw = auth.split(</span><span class="s2">&quot;:&quot;</span><span class="s0">, </span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">user</span><span class="s0">, </span><span class="s1">pw = auth</span><span class="s0">, None</span>
+
+    <span class="s1">user = urllib.parse.unquote(user)</span>
+    <span class="s0">if </span><span class="s1">pw </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s1">pw = urllib.parse.unquote(pw)</span>
+
+    <span class="s0">return </span><span class="s1">netloc</span><span class="s0">, </span><span class="s1">(user</span><span class="s0">, </span><span class="s1">pw)</span>
+
+
+<span class="s0">def </span><span class="s1">redact_netloc(netloc: str) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Replace the sensitive data in a netloc with &quot;****&quot;, if it exists. 
+ 
+    For example: 
+        - &quot;user:pass@example.com&quot; returns &quot;user:****@example.com&quot; 
+        - &quot;accesstoken@example.com&quot; returns &quot;****@example.com&quot; 
+    &quot;&quot;&quot;</span>
+    <span class="s1">netloc</span><span class="s0">, </span><span class="s1">(user</span><span class="s0">, </span><span class="s1">password) = split_auth_from_netloc(netloc)</span>
+    <span class="s0">if </span><span class="s1">user </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">netloc</span>
+    <span class="s0">if </span><span class="s1">password </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s1">user = </span><span class="s2">&quot;****&quot;</span>
+        <span class="s1">password = </span><span class="s2">&quot;&quot;</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">user = urllib.parse.quote(user)</span>
+        <span class="s1">password = </span><span class="s2">&quot;:****&quot;</span>
+    <span class="s0">return </span><span class="s2">&quot;{user}{password}@{netloc}&quot;</span><span class="s1">.format(</span>
+        <span class="s1">user=user</span><span class="s0">, </span><span class="s1">password=password</span><span class="s0">, </span><span class="s1">netloc=netloc</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_transform_url(</span>
+    <span class="s1">url: str</span><span class="s0">, </span><span class="s1">transform_netloc: Callable[[str]</span><span class="s0">, </span><span class="s1">Tuple[Any</span><span class="s0">, </span><span class="s1">...]]</span>
+<span class="s1">) -&gt; Tuple[str</span><span class="s0">, </span><span class="s1">NetlocTuple]:</span>
+    <span class="s3">&quot;&quot;&quot;Transform and replace netloc in a url. 
+ 
+    transform_netloc is a function taking the netloc and returning a 
+    tuple. The first element of this tuple is the new netloc. The 
+    entire tuple is returned. 
+ 
+    Returns a tuple containing the transformed url as item 0 and the 
+    original tuple returned by transform_netloc as item 1. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">purl = urllib.parse.urlsplit(url)</span>
+    <span class="s1">netloc_tuple = transform_netloc(purl.netloc)</span>
+    <span class="s5"># stripped url</span>
+    <span class="s1">url_pieces = (purl.scheme</span><span class="s0">, </span><span class="s1">netloc_tuple[</span><span class="s4">0</span><span class="s1">]</span><span class="s0">, </span><span class="s1">purl.path</span><span class="s0">, </span><span class="s1">purl.query</span><span class="s0">, </span><span class="s1">purl.fragment)</span>
+    <span class="s1">surl = urllib.parse.urlunsplit(url_pieces)</span>
+    <span class="s0">return </span><span class="s1">surl</span><span class="s0">, </span><span class="s1">cast(</span><span class="s2">&quot;NetlocTuple&quot;</span><span class="s0">, </span><span class="s1">netloc_tuple)</span>
+
+
+<span class="s0">def </span><span class="s1">_get_netloc(netloc: str) -&gt; NetlocTuple:</span>
+    <span class="s0">return </span><span class="s1">split_auth_from_netloc(netloc)</span>
+
+
+<span class="s0">def </span><span class="s1">_redact_netloc(netloc: str) -&gt; Tuple[str]:</span>
+    <span class="s0">return </span><span class="s1">(redact_netloc(netloc)</span><span class="s0">,</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">split_auth_netloc_from_url(</span>
+    <span class="s1">url: str</span><span class="s0">,</span>
+<span class="s1">) -&gt; Tuple[str</span><span class="s0">, </span><span class="s1">str</span><span class="s0">, </span><span class="s1">Tuple[Optional[str]</span><span class="s0">, </span><span class="s1">Optional[str]]]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Parse a url into separate netloc, auth, and url with no auth. 
+ 
+    Returns: (url_without_auth, netloc, (username, password)) 
+    &quot;&quot;&quot;</span>
+    <span class="s1">url_without_auth</span><span class="s0">, </span><span class="s1">(netloc</span><span class="s0">, </span><span class="s1">auth) = _transform_url(url</span><span class="s0">, </span><span class="s1">_get_netloc)</span>
+    <span class="s0">return </span><span class="s1">url_without_auth</span><span class="s0">, </span><span class="s1">netloc</span><span class="s0">, </span><span class="s1">auth</span>
+
+
+<span class="s0">def </span><span class="s1">remove_auth_from_url(url: str) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Return a copy of url with 'username:password@' removed.&quot;&quot;&quot;</span>
+    <span class="s5"># username/pass params are passed to subversion through flags</span>
+    <span class="s5"># and are not recognized in the url.</span>
+    <span class="s0">return </span><span class="s1">_transform_url(url</span><span class="s0">, </span><span class="s1">_get_netloc)[</span><span class="s4">0</span><span class="s1">]</span>
+
+
+<span class="s0">def </span><span class="s1">redact_auth_from_url(url: str) -&gt; str:</span>
+    <span class="s3">&quot;&quot;&quot;Replace the password in a given url with ****.&quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">_transform_url(url</span><span class="s0">, </span><span class="s1">_redact_netloc)[</span><span class="s4">0</span><span class="s1">]</span>
+
+
+<span class="s0">class </span><span class="s1">HiddenText:</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">secret: str</span><span class="s0">, </span><span class="s1">redacted: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.secret = secret</span>
+        <span class="s1">self.redacted = redacted</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s2">&quot;&lt;HiddenText {!r}&gt;&quot;</span><span class="s1">.format(str(self))</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s1">self.redacted</span>
+
+    <span class="s5"># This is useful for testing.</span>
+    <span class="s0">def </span><span class="s1">__eq__(self</span><span class="s0">, </span><span class="s1">other: Any) -&gt; bool:</span>
+        <span class="s0">if </span><span class="s1">type(self) != type(other):</span>
+            <span class="s0">return False</span>
+
+        <span class="s5"># The string being used for redaction doesn't also have to match,</span>
+        <span class="s5"># just the raw, original string.</span>
+        <span class="s0">return </span><span class="s1">self.secret == other.secret</span>
+
+
+<span class="s0">def </span><span class="s1">hide_value(value: str) -&gt; HiddenText:</span>
+    <span class="s0">return </span><span class="s1">HiddenText(value</span><span class="s0">, </span><span class="s1">redacted=</span><span class="s2">&quot;****&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">hide_url(url: str) -&gt; HiddenText:</span>
+    <span class="s1">redacted = redact_auth_from_url(url)</span>
+    <span class="s0">return </span><span class="s1">HiddenText(url</span><span class="s0">, </span><span class="s1">redacted=redacted)</span>
+
+
+<span class="s0">def </span><span class="s1">protect_pip_from_modification_on_windows(modifying_pip: bool) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;Protection of pip.exe from modification on Windows 
+ 
+    On Windows, any operation modifying pip should be run as: 
+        python -m pip ... 
+    &quot;&quot;&quot;</span>
+    <span class="s1">pip_names = [</span>
+        <span class="s2">&quot;pip&quot;</span><span class="s0">,</span>
+        <span class="s2">f&quot;pip</span><span class="s0">{</span><span class="s1">sys.version_info.major</span><span class="s0">}</span><span class="s2">&quot;</span><span class="s0">,</span>
+        <span class="s2">f&quot;pip</span><span class="s0">{</span><span class="s1">sys.version_info.major</span><span class="s0">}</span><span class="s2">.</span><span class="s0">{</span><span class="s1">sys.version_info.minor</span><span class="s0">}</span><span class="s2">&quot;</span><span class="s0">,</span>
+    <span class="s1">]</span>
+
+    <span class="s5"># See https://github.com/pypa/pip/issues/1299 for more discussion</span>
+    <span class="s1">should_show_use_python_msg = (</span>
+        <span class="s1">modifying_pip </span><span class="s0">and </span><span class="s1">WINDOWS </span><span class="s0">and </span><span class="s1">os.path.basename(sys.argv[</span><span class="s4">0</span><span class="s1">]) </span><span class="s0">in </span><span class="s1">pip_names</span>
+    <span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s1">should_show_use_python_msg:</span>
+        <span class="s1">new_command = [sys.executable</span><span class="s0">, </span><span class="s2">&quot;-m&quot;</span><span class="s0">, </span><span class="s2">&quot;pip&quot;</span><span class="s1">] + sys.argv[</span><span class="s4">1</span><span class="s1">:]</span>
+        <span class="s0">raise </span><span class="s1">CommandError(</span>
+            <span class="s2">&quot;To modify pip, please run the following command:</span><span class="s0">\n</span><span class="s2">{}&quot;</span><span class="s1">.format(</span>
+                <span class="s2">&quot; &quot;</span><span class="s1">.join(new_command)</span>
+            <span class="s1">)</span>
+        <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">check_externally_managed() -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;Check whether the current environment is externally managed. 
+ 
+    If the ``EXTERNALLY-MANAGED`` config file is found, the current environment 
+    is considered externally managed, and an ExternallyManagedEnvironment is 
+    raised. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">running_under_virtualenv():</span>
+        <span class="s0">return</span>
+    <span class="s1">marker = os.path.join(sysconfig.get_path(</span><span class="s2">&quot;stdlib&quot;</span><span class="s1">)</span><span class="s0">, </span><span class="s2">&quot;EXTERNALLY-MANAGED&quot;</span><span class="s1">)</span>
+    <span class="s0">if not </span><span class="s1">os.path.isfile(marker):</span>
+        <span class="s0">return</span>
+    <span class="s0">raise </span><span class="s1">ExternallyManagedEnvironment.from_config(marker)</span>
+
+
+<span class="s0">def </span><span class="s1">is_console_interactive() -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;Is this console interactive?&quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">sys.stdin </span><span class="s0">is not None and </span><span class="s1">sys.stdin.isatty()</span>
+
+
+<span class="s0">def </span><span class="s1">hash_file(path: str</span><span class="s0">, </span><span class="s1">blocksize: int = </span><span class="s4">1 </span><span class="s1">&lt;&lt; </span><span class="s4">20</span><span class="s1">) -&gt; Tuple[Any</span><span class="s0">, </span><span class="s1">int]:</span>
+    <span class="s3">&quot;&quot;&quot;Return (hash, length) for path using hashlib.sha256()&quot;&quot;&quot;</span>
+
+    <span class="s1">h = hashlib.sha256()</span>
+    <span class="s1">length = </span><span class="s4">0</span>
+    <span class="s0">with </span><span class="s1">open(path</span><span class="s0">, </span><span class="s2">&quot;rb&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">f:</span>
+        <span class="s0">for </span><span class="s1">block </span><span class="s0">in </span><span class="s1">read_chunks(f</span><span class="s0">, </span><span class="s1">size=blocksize):</span>
+            <span class="s1">length += len(block)</span>
+            <span class="s1">h.update(block)</span>
+    <span class="s0">return </span><span class="s1">h</span><span class="s0">, </span><span class="s1">length</span>
+
+
+<span class="s0">def </span><span class="s1">pairwise(iterable: Iterable[Any]) -&gt; Iterator[Tuple[Any</span><span class="s0">, </span><span class="s1">Any]]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Return paired elements. 
+ 
+    For example: 
+        s -&gt; (s0, s1), (s2, s3), (s4, s5), ... 
+    &quot;&quot;&quot;</span>
+    <span class="s1">iterable = iter(iterable)</span>
+    <span class="s0">return </span><span class="s1">zip_longest(iterable</span><span class="s0">, </span><span class="s1">iterable)</span>
+
+
+<span class="s0">def </span><span class="s1">partition(</span>
+    <span class="s1">pred: Callable[[T]</span><span class="s0">, </span><span class="s1">bool]</span><span class="s0">,</span>
+    <span class="s1">iterable: Iterable[T]</span><span class="s0">,</span>
+<span class="s1">) -&gt; Tuple[Iterable[T]</span><span class="s0">, </span><span class="s1">Iterable[T]]:</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Use a predicate to partition entries into false entries and true entries, 
+    like 
+ 
+        partition(is_odd, range(10)) --&gt; 0 2 4 6 8   and  1 3 5 7 9 
+    &quot;&quot;&quot;</span>
+    <span class="s1">t1</span><span class="s0">, </span><span class="s1">t2 = tee(iterable)</span>
+    <span class="s0">return </span><span class="s1">filterfalse(pred</span><span class="s0">, </span><span class="s1">t1)</span><span class="s0">, </span><span class="s1">filter(pred</span><span class="s0">, </span><span class="s1">t2)</span>
+
+
+<span class="s0">class </span><span class="s1">ConfiguredBuildBackendHookCaller(BuildBackendHookCaller):</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">config_holder: Any</span><span class="s0">,</span>
+        <span class="s1">source_dir: str</span><span class="s0">,</span>
+        <span class="s1">build_backend: str</span><span class="s0">,</span>
+        <span class="s1">backend_path: Optional[str] = </span><span class="s0">None,</span>
+        <span class="s1">runner: Optional[Callable[...</span><span class="s0">, None</span><span class="s1">]] = </span><span class="s0">None,</span>
+        <span class="s1">python_executable: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">):</span>
+        <span class="s1">super().__init__(</span>
+            <span class="s1">source_dir</span><span class="s0">, </span><span class="s1">build_backend</span><span class="s0">, </span><span class="s1">backend_path</span><span class="s0">, </span><span class="s1">runner</span><span class="s0">, </span><span class="s1">python_executable</span>
+        <span class="s1">)</span>
+        <span class="s1">self.config_holder = config_holder</span>
+
+    <span class="s0">def </span><span class="s1">build_wheel(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">wheel_directory: str</span><span class="s0">,</span>
+        <span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None,</span>
+        <span class="s1">metadata_directory: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; str:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().build_wheel(</span>
+            <span class="s1">wheel_directory</span><span class="s0">, </span><span class="s1">config_settings=cs</span><span class="s0">, </span><span class="s1">metadata_directory=metadata_directory</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">build_sdist(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">sdist_directory: str</span><span class="s0">,</span>
+        <span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; str:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().build_sdist(sdist_directory</span><span class="s0">, </span><span class="s1">config_settings=cs)</span>
+
+    <span class="s0">def </span><span class="s1">build_editable(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">wheel_directory: str</span><span class="s0">,</span>
+        <span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None,</span>
+        <span class="s1">metadata_directory: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; str:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().build_editable(</span>
+            <span class="s1">wheel_directory</span><span class="s0">, </span><span class="s1">config_settings=cs</span><span class="s0">, </span><span class="s1">metadata_directory=metadata_directory</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">get_requires_for_build_wheel(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None</span>
+    <span class="s1">) -&gt; List[str]:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().get_requires_for_build_wheel(config_settings=cs)</span>
+
+    <span class="s0">def </span><span class="s1">get_requires_for_build_sdist(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None</span>
+    <span class="s1">) -&gt; List[str]:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().get_requires_for_build_sdist(config_settings=cs)</span>
+
+    <span class="s0">def </span><span class="s1">get_requires_for_build_editable(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None</span>
+    <span class="s1">) -&gt; List[str]:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().get_requires_for_build_editable(config_settings=cs)</span>
+
+    <span class="s0">def </span><span class="s1">prepare_metadata_for_build_wheel(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">metadata_directory: str</span><span class="s0">,</span>
+        <span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None,</span>
+        <span class="s1">_allow_fallback: bool = </span><span class="s0">True,</span>
+    <span class="s1">) -&gt; str:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().prepare_metadata_for_build_wheel(</span>
+            <span class="s1">metadata_directory=metadata_directory</span><span class="s0">,</span>
+            <span class="s1">config_settings=cs</span><span class="s0">,</span>
+            <span class="s1">_allow_fallback=_allow_fallback</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">prepare_metadata_for_build_editable(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">metadata_directory: str</span><span class="s0">,</span>
+        <span class="s1">config_settings: Optional[Dict[str</span><span class="s0">, </span><span class="s1">Union[str</span><span class="s0">, </span><span class="s1">List[str]]]] = </span><span class="s0">None,</span>
+        <span class="s1">_allow_fallback: bool = </span><span class="s0">True,</span>
+    <span class="s1">) -&gt; str:</span>
+        <span class="s1">cs = self.config_holder.config_settings</span>
+        <span class="s0">return </span><span class="s1">super().prepare_metadata_for_build_editable(</span>
+            <span class="s1">metadata_directory=metadata_directory</span><span class="s0">,</span>
+            <span class="s1">config_settings=cs</span><span class="s0">,</span>
+            <span class="s1">_allow_fallback=_allow_fallback</span><span class="s0">,</span>
+        <span class="s1">)</span>
+</pre>
+</body>
+</html>

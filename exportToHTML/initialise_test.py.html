@@ -1,0 +1,210 @@
+<html>
+<head>
+<title>initialise_test.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+initialise_test.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># Copyright Jonathan Hartley 2013. BSD 3-Clause license, see LICENSE file.</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">from </span><span class="s1">unittest </span><span class="s2">import </span><span class="s1">TestCase</span><span class="s2">, </span><span class="s1">main</span><span class="s2">, </span><span class="s1">skipUnless</span>
+
+<span class="s2">try</span><span class="s1">:</span>
+    <span class="s2">from </span><span class="s1">unittest.mock </span><span class="s2">import </span><span class="s1">patch</span><span class="s2">, </span><span class="s1">Mock</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+    <span class="s2">from </span><span class="s1">mock </span><span class="s2">import </span><span class="s1">patch</span><span class="s2">, </span><span class="s1">Mock</span>
+
+<span class="s2">from </span><span class="s1">..ansitowin32 </span><span class="s2">import </span><span class="s1">StreamWrapper</span>
+<span class="s2">from </span><span class="s1">..initialise </span><span class="s2">import </span><span class="s1">init</span><span class="s2">, </span><span class="s1">just_fix_windows_console</span><span class="s2">, </span><span class="s1">_wipe_internal_state_for_tests</span>
+<span class="s2">from </span><span class="s1">.utils </span><span class="s2">import </span><span class="s1">osname</span><span class="s2">, </span><span class="s1">replace_by</span>
+
+<span class="s1">orig_stdout = sys.stdout</span>
+<span class="s1">orig_stderr = sys.stderr</span>
+
+
+<span class="s2">class </span><span class="s1">InitTest(TestCase):</span>
+
+    <span class="s1">@skipUnless(sys.stdout.isatty()</span><span class="s2">, </span><span class="s3">&quot;sys.stdout is not a tty&quot;</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">setUp(self):</span>
+        <span class="s0"># sanity check</span>
+        <span class="s1">self.assertNotWrapped()</span>
+
+    <span class="s2">def </span><span class="s1">tearDown(self):</span>
+        <span class="s1">_wipe_internal_state_for_tests()</span>
+        <span class="s1">sys.stdout = orig_stdout</span>
+        <span class="s1">sys.stderr = orig_stderr</span>
+
+    <span class="s2">def </span><span class="s1">assertWrapped(self):</span>
+        <span class="s1">self.assertIsNot(sys.stdout</span><span class="s2">, </span><span class="s1">orig_stdout</span><span class="s2">, </span><span class="s3">'stdout should be wrapped'</span><span class="s1">)</span>
+        <span class="s1">self.assertIsNot(sys.stderr</span><span class="s2">, </span><span class="s1">orig_stderr</span><span class="s2">, </span><span class="s3">'stderr should be wrapped'</span><span class="s1">)</span>
+        <span class="s1">self.assertTrue(isinstance(sys.stdout</span><span class="s2">, </span><span class="s1">StreamWrapper)</span><span class="s2">,</span>
+            <span class="s3">'bad stdout wrapper'</span><span class="s1">)</span>
+        <span class="s1">self.assertTrue(isinstance(sys.stderr</span><span class="s2">, </span><span class="s1">StreamWrapper)</span><span class="s2">,</span>
+            <span class="s3">'bad stderr wrapper'</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">assertNotWrapped(self):</span>
+        <span class="s1">self.assertIs(sys.stdout</span><span class="s2">, </span><span class="s1">orig_stdout</span><span class="s2">, </span><span class="s3">'stdout should not be wrapped'</span><span class="s1">)</span>
+        <span class="s1">self.assertIs(sys.stderr</span><span class="s2">, </span><span class="s1">orig_stderr</span><span class="s2">, </span><span class="s3">'stderr should not be wrapped'</span><span class="s1">)</span>
+
+    <span class="s1">@patch(</span><span class="s3">'colorama.initialise.reset_all'</span><span class="s1">)</span>
+    <span class="s1">@patch(</span><span class="s3">'colorama.ansitowin32.winapi_test'</span><span class="s2">, lambda </span><span class="s1">*_: </span><span class="s2">True</span><span class="s1">)</span>
+    <span class="s1">@patch(</span><span class="s3">'colorama.ansitowin32.enable_vt_processing'</span><span class="s2">, lambda </span><span class="s1">*_: </span><span class="s2">False</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">testInitWrapsOnWindows(self</span><span class="s2">, </span><span class="s1">_):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;nt&quot;</span><span class="s1">):</span>
+            <span class="s1">init()</span>
+            <span class="s1">self.assertWrapped()</span>
+
+    <span class="s1">@patch(</span><span class="s3">'colorama.initialise.reset_all'</span><span class="s1">)</span>
+    <span class="s1">@patch(</span><span class="s3">'colorama.ansitowin32.winapi_test'</span><span class="s2">, lambda </span><span class="s1">*_: </span><span class="s2">False</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">testInitDoesntWrapOnEmulatedWindows(self</span><span class="s2">, </span><span class="s1">_):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;nt&quot;</span><span class="s1">):</span>
+            <span class="s1">init()</span>
+            <span class="s1">self.assertNotWrapped()</span>
+
+    <span class="s2">def </span><span class="s1">testInitDoesntWrapOnNonWindows(self):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;posix&quot;</span><span class="s1">):</span>
+            <span class="s1">init()</span>
+            <span class="s1">self.assertNotWrapped()</span>
+
+    <span class="s2">def </span><span class="s1">testInitDoesntWrapIfNone(self):</span>
+        <span class="s2">with </span><span class="s1">replace_by(</span><span class="s2">None</span><span class="s1">):</span>
+            <span class="s1">init()</span>
+            <span class="s0"># We can't use assertNotWrapped here because replace_by(None)</span>
+            <span class="s0"># changes stdout/stderr already.</span>
+            <span class="s1">self.assertIsNone(sys.stdout)</span>
+            <span class="s1">self.assertIsNone(sys.stderr)</span>
+
+    <span class="s2">def </span><span class="s1">testInitAutoresetOnWrapsOnAllPlatforms(self):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;posix&quot;</span><span class="s1">):</span>
+            <span class="s1">init(autoreset=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s1">self.assertWrapped()</span>
+
+    <span class="s2">def </span><span class="s1">testInitWrapOffDoesntWrapOnWindows(self):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;nt&quot;</span><span class="s1">):</span>
+            <span class="s1">init(wrap=</span><span class="s2">False</span><span class="s1">)</span>
+            <span class="s1">self.assertNotWrapped()</span>
+
+    <span class="s2">def </span><span class="s1">testInitWrapOffIncompatibleWithAutoresetOn(self):</span>
+        <span class="s1">self.assertRaises(ValueError</span><span class="s2">, lambda</span><span class="s1">: init(autoreset=</span><span class="s2">True, </span><span class="s1">wrap=</span><span class="s2">False</span><span class="s1">))</span>
+
+    <span class="s1">@patch(</span><span class="s3">'colorama.win32.SetConsoleTextAttribute'</span><span class="s1">)</span>
+    <span class="s1">@patch(</span><span class="s3">'colorama.initialise.AnsiToWin32'</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">testAutoResetPassedOn(self</span><span class="s2">, </span><span class="s1">mockATW32</span><span class="s2">, </span><span class="s1">_):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;nt&quot;</span><span class="s1">):</span>
+            <span class="s1">init(autoreset=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(len(mockATW32.call_args_list)</span><span class="s2">, </span><span class="s4">2</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(mockATW32.call_args_list[</span><span class="s4">1</span><span class="s1">][</span><span class="s4">1</span><span class="s1">][</span><span class="s3">'autoreset'</span><span class="s1">]</span><span class="s2">, True</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(mockATW32.call_args_list[</span><span class="s4">0</span><span class="s1">][</span><span class="s4">1</span><span class="s1">][</span><span class="s3">'autoreset'</span><span class="s1">]</span><span class="s2">, True</span><span class="s1">)</span>
+
+    <span class="s1">@patch(</span><span class="s3">'colorama.initialise.AnsiToWin32'</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">testAutoResetChangeable(self</span><span class="s2">, </span><span class="s1">mockATW32):</span>
+        <span class="s2">with </span><span class="s1">osname(</span><span class="s3">&quot;nt&quot;</span><span class="s1">):</span>
+            <span class="s1">init()</span>
+
+            <span class="s1">init(autoreset=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(len(mockATW32.call_args_list)</span><span class="s2">, </span><span class="s4">4</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(mockATW32.call_args_list[</span><span class="s4">2</span><span class="s1">][</span><span class="s4">1</span><span class="s1">][</span><span class="s3">'autoreset'</span><span class="s1">]</span><span class="s2">, True</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(mockATW32.call_args_list[</span><span class="s4">3</span><span class="s1">][</span><span class="s4">1</span><span class="s1">][</span><span class="s3">'autoreset'</span><span class="s1">]</span><span class="s2">, True</span><span class="s1">)</span>
+
+            <span class="s1">init()</span>
+            <span class="s1">self.assertEqual(len(mockATW32.call_args_list)</span><span class="s2">, </span><span class="s4">6</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(</span>
+                <span class="s1">mockATW32.call_args_list[</span><span class="s4">4</span><span class="s1">][</span><span class="s4">1</span><span class="s1">][</span><span class="s3">'autoreset'</span><span class="s1">]</span><span class="s2">, False</span><span class="s1">)</span>
+            <span class="s1">self.assertEqual(</span>
+                <span class="s1">mockATW32.call_args_list[</span><span class="s4">5</span><span class="s1">][</span><span class="s4">1</span><span class="s1">][</span><span class="s3">'autoreset'</span><span class="s1">]</span><span class="s2">, False</span><span class="s1">)</span>
+
+
+    <span class="s1">@patch(</span><span class="s3">'colorama.initialise.atexit.register'</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">testAtexitRegisteredOnlyOnce(self</span><span class="s2">, </span><span class="s1">mockRegister):</span>
+        <span class="s1">init()</span>
+        <span class="s1">self.assertTrue(mockRegister.called)</span>
+        <span class="s1">mockRegister.reset_mock()</span>
+        <span class="s1">init()</span>
+        <span class="s1">self.assertFalse(mockRegister.called)</span>
+
+
+<span class="s2">class </span><span class="s1">JustFixWindowsConsoleTest(TestCase):</span>
+    <span class="s2">def </span><span class="s1">_reset(self):</span>
+        <span class="s1">_wipe_internal_state_for_tests()</span>
+        <span class="s1">sys.stdout = orig_stdout</span>
+        <span class="s1">sys.stderr = orig_stderr</span>
+
+    <span class="s2">def </span><span class="s1">tearDown(self):</span>
+        <span class="s1">self._reset()</span>
+
+    <span class="s1">@patch(</span><span class="s3">&quot;colorama.ansitowin32.winapi_test&quot;</span><span class="s2">, lambda</span><span class="s1">: </span><span class="s2">True</span><span class="s1">)</span>
+    <span class="s2">def </span><span class="s1">testJustFixWindowsConsole(self):</span>
+        <span class="s2">if </span><span class="s1">sys.platform != </span><span class="s3">&quot;win32&quot;</span><span class="s1">:</span>
+            <span class="s0"># just_fix_windows_console should be a no-op</span>
+            <span class="s1">just_fix_windows_console()</span>
+            <span class="s1">self.assertIs(sys.stdout</span><span class="s2">, </span><span class="s1">orig_stdout)</span>
+            <span class="s1">self.assertIs(sys.stderr</span><span class="s2">, </span><span class="s1">orig_stderr)</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">def </span><span class="s1">fake_std():</span>
+                <span class="s0"># Emulate stdout=not a tty, stderr=tty</span>
+                <span class="s0"># to check that we handle both cases correctly</span>
+                <span class="s1">stdout = Mock()</span>
+                <span class="s1">stdout.closed = </span><span class="s2">False</span>
+                <span class="s1">stdout.isatty.return_value = </span><span class="s2">False</span>
+                <span class="s1">stdout.fileno.return_value = </span><span class="s4">1</span>
+                <span class="s1">sys.stdout = stdout</span>
+
+                <span class="s1">stderr = Mock()</span>
+                <span class="s1">stderr.closed = </span><span class="s2">False</span>
+                <span class="s1">stderr.isatty.return_value = </span><span class="s2">True</span>
+                <span class="s1">stderr.fileno.return_value = </span><span class="s4">2</span>
+                <span class="s1">sys.stderr = stderr</span>
+
+            <span class="s2">for </span><span class="s1">native_ansi </span><span class="s2">in </span><span class="s1">[</span><span class="s2">False, True</span><span class="s1">]:</span>
+                <span class="s2">with </span><span class="s1">patch(</span>
+                    <span class="s3">'colorama.ansitowin32.enable_vt_processing'</span><span class="s2">,</span>
+                    <span class="s2">lambda </span><span class="s1">*_: native_ansi</span>
+                <span class="s1">):</span>
+                    <span class="s1">self._reset()</span>
+                    <span class="s1">fake_std()</span>
+
+                    <span class="s0"># Regular single-call test</span>
+                    <span class="s1">prev_stdout = sys.stdout</span>
+                    <span class="s1">prev_stderr = sys.stderr</span>
+                    <span class="s1">just_fix_windows_console()</span>
+                    <span class="s1">self.assertIs(sys.stdout</span><span class="s2">, </span><span class="s1">prev_stdout)</span>
+                    <span class="s2">if </span><span class="s1">native_ansi:</span>
+                        <span class="s1">self.assertIs(sys.stderr</span><span class="s2">, </span><span class="s1">prev_stderr)</span>
+                    <span class="s2">else</span><span class="s1">:</span>
+                        <span class="s1">self.assertIsNot(sys.stderr</span><span class="s2">, </span><span class="s1">prev_stderr)</span>
+
+                    <span class="s0"># second call without resetting is always a no-op</span>
+                    <span class="s1">prev_stdout = sys.stdout</span>
+                    <span class="s1">prev_stderr = sys.stderr</span>
+                    <span class="s1">just_fix_windows_console()</span>
+                    <span class="s1">self.assertIs(sys.stdout</span><span class="s2">, </span><span class="s1">prev_stdout)</span>
+                    <span class="s1">self.assertIs(sys.stderr</span><span class="s2">, </span><span class="s1">prev_stderr)</span>
+
+                    <span class="s1">self._reset()</span>
+                    <span class="s1">fake_std()</span>
+
+                    <span class="s0"># If init() runs first, just_fix_windows_console should be a no-op</span>
+                    <span class="s1">init()</span>
+                    <span class="s1">prev_stdout = sys.stdout</span>
+                    <span class="s1">prev_stderr = sys.stderr</span>
+                    <span class="s1">just_fix_windows_console()</span>
+                    <span class="s1">self.assertIs(prev_stdout</span><span class="s2">, </span><span class="s1">sys.stdout)</span>
+                    <span class="s1">self.assertIs(prev_stderr</span><span class="s2">, </span><span class="s1">sys.stderr)</span>
+
+
+<span class="s2">if </span><span class="s1">__name__ == </span><span class="s3">'__main__'</span><span class="s1">:</span>
+    <span class="s1">main()</span>
+</pre>
+</body>
+</html>

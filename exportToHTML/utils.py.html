@@ -1,0 +1,444 @@
+<html>
+<head>
+<title>utils.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #6897bb;}
+.s4 { color: #629755; font-style: italic;}
+.s5 { color: #808080;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+utils.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">importlib</span>
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">unicodedata</span>
+<span class="s0">from </span><span class="s1">codecs </span><span class="s0">import </span><span class="s1">IncrementalDecoder</span>
+<span class="s0">from </span><span class="s1">encodings.aliases </span><span class="s0">import </span><span class="s1">aliases</span>
+<span class="s0">from </span><span class="s1">functools </span><span class="s0">import </span><span class="s1">lru_cache</span>
+<span class="s0">from </span><span class="s1">re </span><span class="s0">import </span><span class="s1">findall</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Generator</span><span class="s0">, </span><span class="s1">List</span><span class="s0">, </span><span class="s1">Optional</span><span class="s0">, </span><span class="s1">Set</span><span class="s0">, </span><span class="s1">Tuple</span><span class="s0">, </span><span class="s1">Union</span>
+
+<span class="s0">from </span><span class="s1">_multibytecodec </span><span class="s0">import </span><span class="s1">MultibyteIncrementalDecoder</span>
+
+<span class="s0">from </span><span class="s1">.constant </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">ENCODING_MARKS</span><span class="s0">,</span>
+    <span class="s1">IANA_SUPPORTED_SIMILAR</span><span class="s0">,</span>
+    <span class="s1">RE_POSSIBLE_ENCODING_INDICATION</span><span class="s0">,</span>
+    <span class="s1">UNICODE_RANGES_COMBINED</span><span class="s0">,</span>
+    <span class="s1">UNICODE_SECONDARY_RANGE_KEYWORD</span><span class="s0">,</span>
+    <span class="s1">UTF8_MAXIMAL_ALLOCATION</span><span class="s0">,</span>
+<span class="s1">)</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_accentuated(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">description: str = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+    <span class="s0">return </span><span class="s1">(</span>
+        <span class="s2">&quot;WITH GRAVE&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH ACUTE&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH CEDILLA&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH DIAERESIS&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH CIRCUMFLEX&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH TILDE&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH MACRON&quot; </span><span class="s0">in </span><span class="s1">description</span>
+        <span class="s0">or </span><span class="s2">&quot;WITH RING ABOVE&quot; </span><span class="s0">in </span><span class="s1">description</span>
+    <span class="s1">)</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">remove_accent(character: str) -&gt; str:</span>
+    <span class="s1">decomposed: str = unicodedata.decomposition(character)</span>
+    <span class="s0">if not </span><span class="s1">decomposed:</span>
+        <span class="s0">return </span><span class="s1">character</span>
+
+    <span class="s1">codes: List[str] = decomposed.split(</span><span class="s2">&quot; &quot;</span><span class="s1">)</span>
+
+    <span class="s0">return </span><span class="s1">chr(int(codes[</span><span class="s3">0</span><span class="s1">]</span><span class="s0">, </span><span class="s3">16</span><span class="s1">))</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">unicode_range(character: str) -&gt; Optional[str]:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Retrieve the Unicode range official name from a single character. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">character_ord: int = ord(character)</span>
+
+    <span class="s0">for </span><span class="s1">range_name</span><span class="s0">, </span><span class="s1">ord_range </span><span class="s0">in </span><span class="s1">UNICODE_RANGES_COMBINED.items():</span>
+        <span class="s0">if </span><span class="s1">character_ord </span><span class="s0">in </span><span class="s1">ord_range:</span>
+            <span class="s0">return </span><span class="s1">range_name</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_latin(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">description: str = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+    <span class="s0">return </span><span class="s2">&quot;LATIN&quot; </span><span class="s0">in </span><span class="s1">description</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_punctuation(character: str) -&gt; bool:</span>
+    <span class="s1">character_category: str = unicodedata.category(character)</span>
+
+    <span class="s0">if </span><span class="s2">&quot;P&quot; </span><span class="s0">in </span><span class="s1">character_category:</span>
+        <span class="s0">return True</span>
+
+    <span class="s1">character_range: Optional[str] = unicode_range(character)</span>
+
+    <span class="s0">if </span><span class="s1">character_range </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;Punctuation&quot; </span><span class="s0">in </span><span class="s1">character_range</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_symbol(character: str) -&gt; bool:</span>
+    <span class="s1">character_category: str = unicodedata.category(character)</span>
+
+    <span class="s0">if </span><span class="s2">&quot;S&quot; </span><span class="s0">in </span><span class="s1">character_category </span><span class="s0">or </span><span class="s2">&quot;N&quot; </span><span class="s0">in </span><span class="s1">character_category:</span>
+        <span class="s0">return True</span>
+
+    <span class="s1">character_range: Optional[str] = unicode_range(character)</span>
+
+    <span class="s0">if </span><span class="s1">character_range </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;Forms&quot; </span><span class="s0">in </span><span class="s1">character_range </span><span class="s0">and </span><span class="s1">character_category != </span><span class="s2">&quot;Lo&quot;</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_emoticon(character: str) -&gt; bool:</span>
+    <span class="s1">character_range: Optional[str] = unicode_range(character)</span>
+
+    <span class="s0">if </span><span class="s1">character_range </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;Emoticons&quot; </span><span class="s0">in </span><span class="s1">character_range </span><span class="s0">or </span><span class="s2">&quot;Pictographs&quot; </span><span class="s0">in </span><span class="s1">character_range</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_separator(character: str) -&gt; bool:</span>
+    <span class="s0">if </span><span class="s1">character.isspace() </span><span class="s0">or </span><span class="s1">character </span><span class="s0">in </span><span class="s1">{</span><span class="s2">&quot;｜&quot;</span><span class="s0">, </span><span class="s2">&quot;+&quot;</span><span class="s0">, </span><span class="s2">&quot;&lt;&quot;</span><span class="s0">, </span><span class="s2">&quot;&gt;&quot;</span><span class="s1">}:</span>
+        <span class="s0">return True</span>
+
+    <span class="s1">character_category: str = unicodedata.category(character)</span>
+
+    <span class="s0">return </span><span class="s2">&quot;Z&quot; </span><span class="s0">in </span><span class="s1">character_category </span><span class="s0">or </span><span class="s1">character_category </span><span class="s0">in </span><span class="s1">{</span><span class="s2">&quot;Po&quot;</span><span class="s0">, </span><span class="s2">&quot;Pd&quot;</span><span class="s0">, </span><span class="s2">&quot;Pc&quot;</span><span class="s1">}</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_case_variable(character: str) -&gt; bool:</span>
+    <span class="s0">return </span><span class="s1">character.islower() != character.isupper()</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_cjk(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;CJK&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_hiragana(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;HIRAGANA&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_katakana(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;KATAKANA&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_hangul(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;HANGUL&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_thai(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;THAI&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_arabic(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;ARABIC&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_arabic_isolated_form(character: str) -&gt; bool:</span>
+    <span class="s0">try</span><span class="s1">:</span>
+        <span class="s1">character_name = unicodedata.name(character)</span>
+    <span class="s0">except </span><span class="s1">ValueError:</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">return </span><span class="s2">&quot;ARABIC&quot; </span><span class="s0">in </span><span class="s1">character_name </span><span class="s0">and </span><span class="s2">&quot;ISOLATED FORM&quot; </span><span class="s0">in </span><span class="s1">character_name</span>
+
+
+<span class="s1">@lru_cache(maxsize=len(UNICODE_RANGES_COMBINED))</span>
+<span class="s0">def </span><span class="s1">is_unicode_range_secondary(range_name: str) -&gt; bool:</span>
+    <span class="s0">return </span><span class="s1">any(keyword </span><span class="s0">in </span><span class="s1">range_name </span><span class="s0">for </span><span class="s1">keyword </span><span class="s0">in </span><span class="s1">UNICODE_SECONDARY_RANGE_KEYWORD)</span>
+
+
+<span class="s1">@lru_cache(maxsize=UTF8_MAXIMAL_ALLOCATION)</span>
+<span class="s0">def </span><span class="s1">is_unprintable(character: str) -&gt; bool:</span>
+    <span class="s0">return </span><span class="s1">(</span>
+        <span class="s1">character.isspace() </span><span class="s0">is False  </span><span class="s5"># includes \n \t \r \v</span>
+        <span class="s0">and </span><span class="s1">character.isprintable() </span><span class="s0">is False</span>
+        <span class="s0">and </span><span class="s1">character != </span><span class="s2">&quot;</span><span class="s0">\x1A</span><span class="s2">&quot;  </span><span class="s5"># Why? Its the ASCII substitute character.</span>
+        <span class="s0">and </span><span class="s1">character != </span><span class="s2">&quot;</span><span class="s0">\ufeff</span><span class="s2">&quot;  </span><span class="s5"># bug discovered in Python,</span>
+        <span class="s5"># Zero Width No-Break Space located in  Arabic Presentation Forms-B, Unicode 1.1 not acknowledged as space.</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">any_specified_encoding(sequence: bytes</span><span class="s0">, </span><span class="s1">search_zone: int = </span><span class="s3">8192</span><span class="s1">) -&gt; Optional[str]:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Extract using ASCII-only decoder any specified encoding in the first n-bytes. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if not </span><span class="s1">isinstance(sequence</span><span class="s0">, </span><span class="s1">bytes):</span>
+        <span class="s0">raise </span><span class="s1">TypeError</span>
+
+    <span class="s1">seq_len: int = len(sequence)</span>
+
+    <span class="s1">results: List[str] = findall(</span>
+        <span class="s1">RE_POSSIBLE_ENCODING_INDICATION</span><span class="s0">,</span>
+        <span class="s1">sequence[: min(seq_len</span><span class="s0">, </span><span class="s1">search_zone)].decode(</span><span class="s2">&quot;ascii&quot;</span><span class="s0">, </span><span class="s1">errors=</span><span class="s2">&quot;ignore&quot;</span><span class="s1">)</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s1">len(results) == </span><span class="s3">0</span><span class="s1">:</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">for </span><span class="s1">specified_encoding </span><span class="s0">in </span><span class="s1">results:</span>
+        <span class="s1">specified_encoding = specified_encoding.lower().replace(</span><span class="s2">&quot;-&quot;</span><span class="s0">, </span><span class="s2">&quot;_&quot;</span><span class="s1">)</span>
+
+        <span class="s1">encoding_alias: str</span>
+        <span class="s1">encoding_iana: str</span>
+
+        <span class="s0">for </span><span class="s1">encoding_alias</span><span class="s0">, </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">aliases.items():</span>
+            <span class="s0">if </span><span class="s1">encoding_alias == specified_encoding:</span>
+                <span class="s0">return </span><span class="s1">encoding_iana</span>
+            <span class="s0">if </span><span class="s1">encoding_iana == specified_encoding:</span>
+                <span class="s0">return </span><span class="s1">encoding_iana</span>
+
+    <span class="s0">return None</span>
+
+
+<span class="s1">@lru_cache(maxsize=</span><span class="s3">128</span><span class="s1">)</span>
+<span class="s0">def </span><span class="s1">is_multi_byte_encoding(name: str) -&gt; bool:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Verify is a specific encoding is a multi byte one based on it IANA name 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">name </span><span class="s0">in </span><span class="s1">{</span>
+        <span class="s2">&quot;utf_8&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_8_sig&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_16&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_16_be&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_16_le&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_32&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_32_le&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_32_be&quot;</span><span class="s0">,</span>
+        <span class="s2">&quot;utf_7&quot;</span><span class="s0">,</span>
+    <span class="s1">} </span><span class="s0">or </span><span class="s1">issubclass(</span>
+        <span class="s1">importlib.import_module(</span><span class="s2">&quot;encodings.{}&quot;</span><span class="s1">.format(name)).IncrementalDecoder</span><span class="s0">,</span>
+        <span class="s1">MultibyteIncrementalDecoder</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">identify_sig_or_bom(sequence: bytes) -&gt; Tuple[Optional[str]</span><span class="s0">, </span><span class="s1">bytes]:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Identify and extract SIG/BOM in given sequence. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">for </span><span class="s1">iana_encoding </span><span class="s0">in </span><span class="s1">ENCODING_MARKS:</span>
+        <span class="s1">marks: Union[bytes</span><span class="s0">, </span><span class="s1">List[bytes]] = ENCODING_MARKS[iana_encoding]</span>
+
+        <span class="s0">if </span><span class="s1">isinstance(marks</span><span class="s0">, </span><span class="s1">bytes):</span>
+            <span class="s1">marks = [marks]</span>
+
+        <span class="s0">for </span><span class="s1">mark </span><span class="s0">in </span><span class="s1">marks:</span>
+            <span class="s0">if </span><span class="s1">sequence.startswith(mark):</span>
+                <span class="s0">return </span><span class="s1">iana_encoding</span><span class="s0">, </span><span class="s1">mark</span>
+
+    <span class="s0">return None, </span><span class="s6">b&quot;&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">should_strip_sig_or_bom(iana_encoding: str) -&gt; bool:</span>
+    <span class="s0">return </span><span class="s1">iana_encoding </span><span class="s0">not in </span><span class="s1">{</span><span class="s2">&quot;utf_16&quot;</span><span class="s0">, </span><span class="s2">&quot;utf_32&quot;</span><span class="s1">}</span>
+
+
+<span class="s0">def </span><span class="s1">iana_name(cp_name: str</span><span class="s0">, </span><span class="s1">strict: bool = </span><span class="s0">True</span><span class="s1">) -&gt; str:</span>
+    <span class="s1">cp_name = cp_name.lower().replace(</span><span class="s2">&quot;-&quot;</span><span class="s0">, </span><span class="s2">&quot;_&quot;</span><span class="s1">)</span>
+
+    <span class="s1">encoding_alias: str</span>
+    <span class="s1">encoding_iana: str</span>
+
+    <span class="s0">for </span><span class="s1">encoding_alias</span><span class="s0">, </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">aliases.items():</span>
+        <span class="s0">if </span><span class="s1">cp_name </span><span class="s0">in </span><span class="s1">[encoding_alias</span><span class="s0">, </span><span class="s1">encoding_iana]:</span>
+            <span class="s0">return </span><span class="s1">encoding_iana</span>
+
+    <span class="s0">if </span><span class="s1">strict:</span>
+        <span class="s0">raise </span><span class="s1">ValueError(</span><span class="s2">&quot;Unable to retrieve IANA for '{}'&quot;</span><span class="s1">.format(cp_name))</span>
+
+    <span class="s0">return </span><span class="s1">cp_name</span>
+
+
+<span class="s0">def </span><span class="s1">range_scan(decoded_sequence: str) -&gt; List[str]:</span>
+    <span class="s1">ranges: Set[str] = set()</span>
+
+    <span class="s0">for </span><span class="s1">character </span><span class="s0">in </span><span class="s1">decoded_sequence:</span>
+        <span class="s1">character_range: Optional[str] = unicode_range(character)</span>
+
+        <span class="s0">if </span><span class="s1">character_range </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">continue</span>
+
+        <span class="s1">ranges.add(character_range)</span>
+
+    <span class="s0">return </span><span class="s1">list(ranges)</span>
+
+
+<span class="s0">def </span><span class="s1">cp_similarity(iana_name_a: str</span><span class="s0">, </span><span class="s1">iana_name_b: str) -&gt; float:</span>
+    <span class="s0">if </span><span class="s1">is_multi_byte_encoding(iana_name_a) </span><span class="s0">or </span><span class="s1">is_multi_byte_encoding(iana_name_b):</span>
+        <span class="s0">return </span><span class="s3">0.0</span>
+
+    <span class="s1">decoder_a = importlib.import_module(</span>
+        <span class="s2">&quot;encodings.{}&quot;</span><span class="s1">.format(iana_name_a)</span>
+    <span class="s1">).IncrementalDecoder</span>
+    <span class="s1">decoder_b = importlib.import_module(</span>
+        <span class="s2">&quot;encodings.{}&quot;</span><span class="s1">.format(iana_name_b)</span>
+    <span class="s1">).IncrementalDecoder</span>
+
+    <span class="s1">id_a: IncrementalDecoder = decoder_a(errors=</span><span class="s2">&quot;ignore&quot;</span><span class="s1">)</span>
+    <span class="s1">id_b: IncrementalDecoder = decoder_b(errors=</span><span class="s2">&quot;ignore&quot;</span><span class="s1">)</span>
+
+    <span class="s1">character_match_count: int = </span><span class="s3">0</span>
+
+    <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">range(</span><span class="s3">255</span><span class="s1">):</span>
+        <span class="s1">to_be_decoded: bytes = bytes([i])</span>
+        <span class="s0">if </span><span class="s1">id_a.decode(to_be_decoded) == id_b.decode(to_be_decoded):</span>
+            <span class="s1">character_match_count += </span><span class="s3">1</span>
+
+    <span class="s0">return </span><span class="s1">character_match_count / </span><span class="s3">254</span>
+
+
+<span class="s0">def </span><span class="s1">is_cp_similar(iana_name_a: str</span><span class="s0">, </span><span class="s1">iana_name_b: str) -&gt; bool:</span>
+    <span class="s4">&quot;&quot;&quot; 
+    Determine if two code page are at least 80% similar. IANA_SUPPORTED_SIMILAR dict was generated using 
+    the function cp_similarity. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">(</span>
+        <span class="s1">iana_name_a </span><span class="s0">in </span><span class="s1">IANA_SUPPORTED_SIMILAR</span>
+        <span class="s0">and </span><span class="s1">iana_name_b </span><span class="s0">in </span><span class="s1">IANA_SUPPORTED_SIMILAR[iana_name_a]</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">set_logging_handler(</span>
+    <span class="s1">name: str = </span><span class="s2">&quot;charset_normalizer&quot;</span><span class="s0">,</span>
+    <span class="s1">level: int = logging.INFO</span><span class="s0">,</span>
+    <span class="s1">format_string: str = </span><span class="s2">&quot;%(asctime)s | %(levelname)s | %(message)s&quot;</span><span class="s0">,</span>
+<span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">logger = logging.getLogger(name)</span>
+    <span class="s1">logger.setLevel(level)</span>
+
+    <span class="s1">handler = logging.StreamHandler()</span>
+    <span class="s1">handler.setFormatter(logging.Formatter(format_string))</span>
+    <span class="s1">logger.addHandler(handler)</span>
+
+
+<span class="s0">def </span><span class="s1">cut_sequence_chunks(</span>
+    <span class="s1">sequences: bytes</span><span class="s0">,</span>
+    <span class="s1">encoding_iana: str</span><span class="s0">,</span>
+    <span class="s1">offsets: range</span><span class="s0">,</span>
+    <span class="s1">chunk_size: int</span><span class="s0">,</span>
+    <span class="s1">bom_or_sig_available: bool</span><span class="s0">,</span>
+    <span class="s1">strip_sig_or_bom: bool</span><span class="s0">,</span>
+    <span class="s1">sig_payload: bytes</span><span class="s0">,</span>
+    <span class="s1">is_multi_byte_decoder: bool</span><span class="s0">,</span>
+    <span class="s1">decoded_payload: Optional[str] = </span><span class="s0">None,</span>
+<span class="s1">) -&gt; Generator[str</span><span class="s0">, None, None</span><span class="s1">]:</span>
+    <span class="s0">if </span><span class="s1">decoded_payload </span><span class="s0">and </span><span class="s1">is_multi_byte_decoder </span><span class="s0">is False</span><span class="s1">:</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">offsets:</span>
+            <span class="s1">chunk = decoded_payload[i : i + chunk_size]</span>
+            <span class="s0">if not </span><span class="s1">chunk:</span>
+                <span class="s0">break</span>
+            <span class="s0">yield </span><span class="s1">chunk</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s0">for </span><span class="s1">i </span><span class="s0">in </span><span class="s1">offsets:</span>
+            <span class="s1">chunk_end = i + chunk_size</span>
+            <span class="s0">if </span><span class="s1">chunk_end &gt; len(sequences) + </span><span class="s3">8</span><span class="s1">:</span>
+                <span class="s0">continue</span>
+
+            <span class="s1">cut_sequence = sequences[i : i + chunk_size]</span>
+
+            <span class="s0">if </span><span class="s1">bom_or_sig_available </span><span class="s0">and </span><span class="s1">strip_sig_or_bom </span><span class="s0">is False</span><span class="s1">:</span>
+                <span class="s1">cut_sequence = sig_payload + cut_sequence</span>
+
+            <span class="s1">chunk = cut_sequence.decode(</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+                <span class="s1">errors=</span><span class="s2">&quot;ignore&quot; </span><span class="s0">if </span><span class="s1">is_multi_byte_decoder </span><span class="s0">else </span><span class="s2">&quot;strict&quot;</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+            <span class="s5"># multi-byte bad cutting detector and adjustment</span>
+            <span class="s5"># not the cleanest way to perform that fix but clever enough for now.</span>
+            <span class="s0">if </span><span class="s1">is_multi_byte_decoder </span><span class="s0">and </span><span class="s1">i &gt; </span><span class="s3">0</span><span class="s1">:</span>
+                <span class="s1">chunk_partial_size_chk: int = min(chunk_size</span><span class="s0">, </span><span class="s3">16</span><span class="s1">)</span>
+
+                <span class="s0">if </span><span class="s1">(</span>
+                    <span class="s1">decoded_payload</span>
+                    <span class="s0">and </span><span class="s1">chunk[:chunk_partial_size_chk] </span><span class="s0">not in </span><span class="s1">decoded_payload</span>
+                <span class="s1">):</span>
+                    <span class="s0">for </span><span class="s1">j </span><span class="s0">in </span><span class="s1">range(i</span><span class="s0">, </span><span class="s1">i - </span><span class="s3">4</span><span class="s0">, </span><span class="s1">-</span><span class="s3">1</span><span class="s1">):</span>
+                        <span class="s1">cut_sequence = sequences[j:chunk_end]</span>
+
+                        <span class="s0">if </span><span class="s1">bom_or_sig_available </span><span class="s0">and </span><span class="s1">strip_sig_or_bom </span><span class="s0">is False</span><span class="s1">:</span>
+                            <span class="s1">cut_sequence = sig_payload + cut_sequence</span>
+
+                        <span class="s1">chunk = cut_sequence.decode(encoding_iana</span><span class="s0">, </span><span class="s1">errors=</span><span class="s2">&quot;ignore&quot;</span><span class="s1">)</span>
+
+                        <span class="s0">if </span><span class="s1">chunk[:chunk_partial_size_chk] </span><span class="s0">in </span><span class="s1">decoded_payload:</span>
+                            <span class="s0">break</span>
+
+            <span class="s0">yield </span><span class="s1">chunk</span>
+</pre>
+</body>
+</html>

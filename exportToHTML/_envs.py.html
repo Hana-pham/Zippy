@@ -1,0 +1,209 @@
+<html>
+<head>
+<title>_envs.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #808080;}
+.s4 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_envs.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">functools</span>
+<span class="s0">import </span><span class="s1">importlib.metadata</span>
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">pathlib</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">zipfile</span>
+<span class="s0">import </span><span class="s1">zipimport</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Iterator</span><span class="s0">, </span><span class="s1">List</span><span class="s0">, </span><span class="s1">Optional</span><span class="s0">, </span><span class="s1">Sequence</span><span class="s0">, </span><span class="s1">Set</span><span class="s0">, </span><span class="s1">Tuple</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.packaging.utils </span><span class="s0">import </span><span class="s1">NormalizedName</span><span class="s0">, </span><span class="s1">canonicalize_name</span>
+
+<span class="s0">from </span><span class="s1">pip._internal.metadata.base </span><span class="s0">import </span><span class="s1">BaseDistribution</span><span class="s0">, </span><span class="s1">BaseEnvironment</span>
+<span class="s0">from </span><span class="s1">pip._internal.models.wheel </span><span class="s0">import </span><span class="s1">Wheel</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.deprecation </span><span class="s0">import </span><span class="s1">deprecated</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.filetypes </span><span class="s0">import </span><span class="s1">WHEEL_EXTENSION</span>
+
+<span class="s0">from </span><span class="s1">._compat </span><span class="s0">import </span><span class="s1">BadMetadata</span><span class="s0">, </span><span class="s1">BasePath</span><span class="s0">, </span><span class="s1">get_dist_name</span><span class="s0">, </span><span class="s1">get_info_location</span>
+<span class="s0">from </span><span class="s1">._dists </span><span class="s0">import </span><span class="s1">Distribution</span>
+
+<span class="s1">logger = logging.getLogger(__name__)</span>
+
+
+<span class="s0">def </span><span class="s1">_looks_like_wheel(location: str) -&gt; bool:</span>
+    <span class="s0">if not </span><span class="s1">location.endswith(WHEEL_EXTENSION):</span>
+        <span class="s0">return False</span>
+    <span class="s0">if not </span><span class="s1">os.path.isfile(location):</span>
+        <span class="s0">return False</span>
+    <span class="s0">if not </span><span class="s1">Wheel.wheel_file_re.match(os.path.basename(location)):</span>
+        <span class="s0">return False</span>
+    <span class="s0">return </span><span class="s1">zipfile.is_zipfile(location)</span>
+
+
+<span class="s0">class </span><span class="s1">_DistributionFinder:</span>
+    <span class="s2">&quot;&quot;&quot;Finder to locate distributions. 
+ 
+    The main purpose of this class is to memoize found distributions' names, so 
+    only one distribution is returned for each package name. At lot of pip code 
+    assumes this (because it is setuptools's behavior), and not doing the same 
+    can potentially cause a distribution in lower precedence path to override a 
+    higher precedence one if the caller is not careful. 
+ 
+    Eventually we probably want to make it possible to see lower precedence 
+    installations as well. It's useful feature, after all. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">FoundResult = Tuple[importlib.metadata.Distribution</span><span class="s0">, </span><span class="s1">Optional[BasePath]]</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._found_names: Set[NormalizedName] = set()</span>
+
+    <span class="s0">def </span><span class="s1">_find_impl(self</span><span class="s0">, </span><span class="s1">location: str) -&gt; Iterator[FoundResult]:</span>
+        <span class="s2">&quot;&quot;&quot;Find distributions in a location.&quot;&quot;&quot;</span>
+        <span class="s3"># Skip looking inside a wheel. Since a package inside a wheel is not</span>
+        <span class="s3"># always valid (due to .data directories etc.), its .dist-info entry</span>
+        <span class="s3"># should not be considered an installed distribution.</span>
+        <span class="s0">if </span><span class="s1">_looks_like_wheel(location):</span>
+            <span class="s0">return</span>
+        <span class="s3"># To know exactly where we find a distribution, we have to feed in the</span>
+        <span class="s3"># paths one by one, instead of dumping the list to importlib.metadata.</span>
+        <span class="s0">for </span><span class="s1">dist </span><span class="s0">in </span><span class="s1">importlib.metadata.distributions(path=[location]):</span>
+            <span class="s1">info_location = get_info_location(dist)</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">raw_name = get_dist_name(dist)</span>
+            <span class="s0">except </span><span class="s1">BadMetadata </span><span class="s0">as </span><span class="s1">e:</span>
+                <span class="s1">logger.warning(</span><span class="s4">&quot;Skipping %s due to %s&quot;</span><span class="s0">, </span><span class="s1">info_location</span><span class="s0">, </span><span class="s1">e.reason)</span>
+                <span class="s0">continue</span>
+            <span class="s1">normalized_name = canonicalize_name(raw_name)</span>
+            <span class="s0">if </span><span class="s1">normalized_name </span><span class="s0">in </span><span class="s1">self._found_names:</span>
+                <span class="s0">continue</span>
+            <span class="s1">self._found_names.add(normalized_name)</span>
+            <span class="s0">yield </span><span class="s1">dist</span><span class="s0">, </span><span class="s1">info_location</span>
+
+    <span class="s0">def </span><span class="s1">find(self</span><span class="s0">, </span><span class="s1">location: str) -&gt; Iterator[BaseDistribution]:</span>
+        <span class="s2">&quot;&quot;&quot;Find distributions in a location. 
+ 
+        The path can be either a directory, or a ZIP archive. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">for </span><span class="s1">dist</span><span class="s0">, </span><span class="s1">info_location </span><span class="s0">in </span><span class="s1">self._find_impl(location):</span>
+            <span class="s0">if </span><span class="s1">info_location </span><span class="s0">is None</span><span class="s1">:</span>
+                <span class="s1">installed_location: Optional[BasePath] = </span><span class="s0">None</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">installed_location = info_location.parent</span>
+            <span class="s0">yield </span><span class="s1">Distribution(dist</span><span class="s0">, </span><span class="s1">info_location</span><span class="s0">, </span><span class="s1">installed_location)</span>
+
+    <span class="s0">def </span><span class="s1">find_linked(self</span><span class="s0">, </span><span class="s1">location: str) -&gt; Iterator[BaseDistribution]:</span>
+        <span class="s2">&quot;&quot;&quot;Read location in egg-link files and return distributions in there. 
+ 
+        The path should be a directory; otherwise this returns nothing. This 
+        follows how setuptools does this for compatibility. The first non-empty 
+        line in the egg-link is read as a path (resolved against the egg-link's 
+        containing directory if relative). Distributions found at that linked 
+        location are returned. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">path = pathlib.Path(location)</span>
+        <span class="s0">if not </span><span class="s1">path.is_dir():</span>
+            <span class="s0">return</span>
+        <span class="s0">for </span><span class="s1">child </span><span class="s0">in </span><span class="s1">path.iterdir():</span>
+            <span class="s0">if </span><span class="s1">child.suffix != </span><span class="s4">&quot;.egg-link&quot;</span><span class="s1">:</span>
+                <span class="s0">continue</span>
+            <span class="s0">with </span><span class="s1">child.open() </span><span class="s0">as </span><span class="s1">f:</span>
+                <span class="s1">lines = (line.strip() </span><span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">f)</span>
+                <span class="s1">target_rel = next((line </span><span class="s0">for </span><span class="s1">line </span><span class="s0">in </span><span class="s1">lines </span><span class="s0">if </span><span class="s1">line)</span><span class="s0">, </span><span class="s4">&quot;&quot;</span><span class="s1">)</span>
+            <span class="s0">if not </span><span class="s1">target_rel:</span>
+                <span class="s0">continue</span>
+            <span class="s1">target_location = str(path.joinpath(target_rel))</span>
+            <span class="s0">for </span><span class="s1">dist</span><span class="s0">, </span><span class="s1">info_location </span><span class="s0">in </span><span class="s1">self._find_impl(target_location):</span>
+                <span class="s0">yield </span><span class="s1">Distribution(dist</span><span class="s0">, </span><span class="s1">info_location</span><span class="s0">, </span><span class="s1">path)</span>
+
+    <span class="s0">def </span><span class="s1">_find_eggs_in_dir(self</span><span class="s0">, </span><span class="s1">location: str) -&gt; Iterator[BaseDistribution]:</span>
+        <span class="s0">from </span><span class="s1">pip._vendor.pkg_resources </span><span class="s0">import </span><span class="s1">find_distributions</span>
+
+        <span class="s0">from </span><span class="s1">pip._internal.metadata </span><span class="s0">import </span><span class="s1">pkg_resources </span><span class="s0">as </span><span class="s1">legacy</span>
+
+        <span class="s0">with </span><span class="s1">os.scandir(location) </span><span class="s0">as </span><span class="s1">it:</span>
+            <span class="s0">for </span><span class="s1">entry </span><span class="s0">in </span><span class="s1">it:</span>
+                <span class="s0">if not </span><span class="s1">entry.name.endswith(</span><span class="s4">&quot;.egg&quot;</span><span class="s1">):</span>
+                    <span class="s0">continue</span>
+                <span class="s0">for </span><span class="s1">dist </span><span class="s0">in </span><span class="s1">find_distributions(entry.path):</span>
+                    <span class="s0">yield </span><span class="s1">legacy.Distribution(dist)</span>
+
+    <span class="s0">def </span><span class="s1">_find_eggs_in_zip(self</span><span class="s0">, </span><span class="s1">location: str) -&gt; Iterator[BaseDistribution]:</span>
+        <span class="s0">from </span><span class="s1">pip._vendor.pkg_resources </span><span class="s0">import </span><span class="s1">find_eggs_in_zip</span>
+
+        <span class="s0">from </span><span class="s1">pip._internal.metadata </span><span class="s0">import </span><span class="s1">pkg_resources </span><span class="s0">as </span><span class="s1">legacy</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">importer = zipimport.zipimporter(location)</span>
+        <span class="s0">except </span><span class="s1">zipimport.ZipImportError:</span>
+            <span class="s0">return</span>
+        <span class="s0">for </span><span class="s1">dist </span><span class="s0">in </span><span class="s1">find_eggs_in_zip(importer</span><span class="s0">, </span><span class="s1">location):</span>
+            <span class="s0">yield </span><span class="s1">legacy.Distribution(dist)</span>
+
+    <span class="s0">def </span><span class="s1">find_eggs(self</span><span class="s0">, </span><span class="s1">location: str) -&gt; Iterator[BaseDistribution]:</span>
+        <span class="s2">&quot;&quot;&quot;Find eggs in a location. 
+ 
+        This actually uses the old *pkg_resources* backend. We likely want to 
+        deprecate this so we can eventually remove the *pkg_resources* 
+        dependency entirely. Before that, this should first emit a deprecation 
+        warning for some versions when using the fallback since importing 
+        *pkg_resources* is slow for those who don't need it. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">os.path.isdir(location):</span>
+            <span class="s0">yield from </span><span class="s1">self._find_eggs_in_dir(location)</span>
+        <span class="s0">if </span><span class="s1">zipfile.is_zipfile(location):</span>
+            <span class="s0">yield from </span><span class="s1">self._find_eggs_in_zip(location)</span>
+
+
+<span class="s1">@functools.lru_cache(maxsize=</span><span class="s0">None</span><span class="s1">)  </span><span class="s3"># Warn a distribution exactly once.</span>
+<span class="s0">def </span><span class="s1">_emit_egg_deprecation(location: Optional[str]) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">deprecated(</span>
+        <span class="s1">reason=</span><span class="s4">f&quot;Loading egg at </span><span class="s0">{</span><span class="s1">location</span><span class="s0">} </span><span class="s4">is deprecated.&quot;</span><span class="s0">,</span>
+        <span class="s1">replacement=</span><span class="s4">&quot;to use pip for package installation.&quot;</span><span class="s0">,</span>
+        <span class="s1">gone_in=</span><span class="s4">&quot;23.3&quot;</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">Environment(BaseEnvironment):</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">paths: Sequence[str]) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self._paths = paths</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">default(cls) -&gt; BaseEnvironment:</span>
+        <span class="s0">return </span><span class="s1">cls(sys.path)</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s0">def </span><span class="s1">from_paths(cls</span><span class="s0">, </span><span class="s1">paths: Optional[List[str]]) -&gt; BaseEnvironment:</span>
+        <span class="s0">if </span><span class="s1">paths </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">cls(sys.path)</span>
+        <span class="s0">return </span><span class="s1">cls(paths)</span>
+
+    <span class="s0">def </span><span class="s1">_iter_distributions(self) -&gt; Iterator[BaseDistribution]:</span>
+        <span class="s1">finder = _DistributionFinder()</span>
+        <span class="s0">for </span><span class="s1">location </span><span class="s0">in </span><span class="s1">self._paths:</span>
+            <span class="s0">yield from </span><span class="s1">finder.find(location)</span>
+            <span class="s0">for </span><span class="s1">dist </span><span class="s0">in </span><span class="s1">finder.find_eggs(location):</span>
+                <span class="s1">_emit_egg_deprecation(dist.location)</span>
+                <span class="s0">yield </span><span class="s1">dist</span>
+            <span class="s3"># This must go last because that's how pkg_resources tie-breaks.</span>
+            <span class="s0">yield from </span><span class="s1">finder.find_linked(location)</span>
+
+    <span class="s0">def </span><span class="s1">get_distribution(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; Optional[BaseDistribution]:</span>
+        <span class="s1">matches = (</span>
+            <span class="s1">distribution</span>
+            <span class="s0">for </span><span class="s1">distribution </span><span class="s0">in </span><span class="s1">self.iter_all_distributions()</span>
+            <span class="s0">if </span><span class="s1">distribution.canonical_name == canonicalize_name(name)</span>
+        <span class="s1">)</span>
+        <span class="s0">return </span><span class="s1">next(matches</span><span class="s0">, None</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

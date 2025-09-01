@@ -1,0 +1,170 @@
+#backToIndex{
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.4)); /* Light gray gradient background with transparency */
+  color: #8a8a8a; /* White text color */
+  display: block;
+
+  margin: 90px auto 50px;
+  border: none; /* Remove border */
+  border-radius: 20px; /* Rounded corners */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3), inset 0 -2px 0 rgba(255, 255, 255, 0.1); /* Outer shadow and inner highlight */
+  padding: 10px 20px; /* Padding inside the button */
+  font-size: 16px; /* Font size */
+  cursor: pointer; /* Change cursor to pointer on hover */
+  outline: none; /* Remove outline on focus */
+  transition: all 0.3s ease; /* Smooth transition effects */
+}
+
+/* Style for the 'Extract' button when hovered over */
+#backToIndex:hover {
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.6)); /* Brighter background on hover */
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4), inset 0 -2px 0 rgba(255, 255, 255, 0.2); /* More pronounced shadow and highlight on hover */
+}
+
+/* Style for the 'Extract' button when active (e.g., when clicked) */
+#backToIndex:active {
+  background-image: none; /* Remove gradient background when active */
+  background-color: rgba(255, 255, 255, 0.1); /* Lighter gray background when active */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Subtle shadow when active */
+  transform: translateY(2px); /* Slight press-down effect */
+}
+
+h1 {
+  margin: 0;
+  font-size: 48px;
+  font-weight: bold;
+  color: black;
+  text-align: center;
+  width: 100%;
+  margin-top: 50vh;
+  transform: translateY(-50%);
+}
+
+h2 {
+   margin-bottom: 40px;
+  font-size: 24px;
+  font-weight: bold;
+  color: black;
+  text-align: center;
+  margin-top: 20px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  position: absolute;
+  top: 40px;
+  left: 40px;
+}
+
+.logo img {
+  width: 80px;
+  height: auto;
+  margin-right: 20px;
+}
+
+
+.footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 100px;
+  background-color: #333;
+  border-top: 1px solid #4d4c4c;
+}
+
+.footer-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 60%;
+  height: 100%;
+  border: 1px solid #726f6f;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.footer-left,
+.footer-middle,
+.footer-right {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.footer-left {
+  flex: 1;
+}
+
+.footer-middle {
+  flex: 2;
+  padding: 0 20px;
+  border-left: 1px solid #8c8989;
+  border-right: 1px solid #8c8989;
+}
+
+.footer-right {
+  flex: 1;
+  text-align: left;
+}
+
+.footer h4{
+  color: red;
+  margin: 0;
+}
+.footer h5,
+.footer h6 {
+  color: #8a8a8a;
+  margin: 0;
+}
+
+.footer h5 img {
+  width: 80px;
+  height: auto;
+  margin-right: 10px;
+}
+
+.footer h6 {
+  font-size: 1em;
+}
+
+.footer img {
+  width: 140px;
+  height: auto;
+}
+
+.footer .divider {
+  height: 1px;
+  width: 100%;
+  background-color: #8c8989;
+  margin: 10px 0;
+}
+
+.footer-right p {
+  text-align: center;
+  margin: 5px 0;
+  color: white;
+}
+
+
+.logo {
+  display: flex;
+  align-items: center;
+  position: absolute;
+  top: 40px;
+  left: 40px;
+}
+
+.logo img {
+  width: 80px;
+  height: auto;
+  margin-right: 20px;
+}
+
+h1 {
+  font-size: 3em;
+  margin: 0;
+}

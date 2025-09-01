@@ -1,0 +1,111 @@
+<html>
+<head>
+<title>requirements.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+requirements.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># This file is dual licensed under the terms of the Apache License, Version</span>
+<span class="s0"># 2.0, and the BSD License. See the LICENSE file in the root of this repository</span>
+<span class="s0"># for complete details.</span>
+
+<span class="s2">from </span><span class="s1">typing </span><span class="s2">import </span><span class="s1">Any</span><span class="s2">, </span><span class="s1">Iterator</span><span class="s2">, </span><span class="s1">Optional</span><span class="s2">, </span><span class="s1">Set</span>
+
+<span class="s2">from </span><span class="s1">._parser </span><span class="s2">import </span><span class="s1">parse_requirement </span><span class="s2">as </span><span class="s1">_parse_requirement</span>
+<span class="s2">from </span><span class="s1">._tokenizer </span><span class="s2">import </span><span class="s1">ParserSyntaxError</span>
+<span class="s2">from </span><span class="s1">.markers </span><span class="s2">import </span><span class="s1">Marker</span><span class="s2">, </span><span class="s1">_normalize_extra_values</span>
+<span class="s2">from </span><span class="s1">.specifiers </span><span class="s2">import </span><span class="s1">SpecifierSet</span>
+<span class="s2">from </span><span class="s1">.utils </span><span class="s2">import </span><span class="s1">canonicalize_name</span>
+
+
+<span class="s2">class </span><span class="s1">InvalidRequirement(ValueError):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    An invalid requirement was found, users should refer to PEP 508. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Requirement:</span>
+    <span class="s3">&quot;&quot;&quot;Parse a requirement. 
+ 
+    Parse a given requirement string into its parts, such as name, specifier, 
+    URL, and extras. Raises InvalidRequirement on a badly-formed requirement 
+    string. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># TODO: Can we test whether something is contained within a requirement?</span>
+    <span class="s0">#       If so how do we do that? Do we need to test against the _name_ of</span>
+    <span class="s0">#       the thing as well as the version? What about the markers?</span>
+    <span class="s0"># TODO: Can we normalize the name and extra name?</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">requirement_string: str) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">parsed = _parse_requirement(requirement_string)</span>
+        <span class="s2">except </span><span class="s1">ParserSyntaxError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">raise </span><span class="s1">InvalidRequirement(str(e)) </span><span class="s2">from </span><span class="s1">e</span>
+
+        <span class="s1">self.name: str = parsed.name</span>
+        <span class="s1">self.url: Optional[str] = parsed.url </span><span class="s2">or None</span>
+        <span class="s1">self.extras: Set[str] = set(parsed.extras </span><span class="s2">or </span><span class="s1">[])</span>
+        <span class="s1">self.specifier: SpecifierSet = SpecifierSet(parsed.specifier)</span>
+        <span class="s1">self.marker: Optional[Marker] = </span><span class="s2">None</span>
+        <span class="s2">if </span><span class="s1">parsed.marker </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">self.marker = Marker.__new__(Marker)</span>
+            <span class="s1">self.marker._markers = _normalize_extra_values(parsed.marker)</span>
+
+    <span class="s2">def </span><span class="s1">_iter_parts(self</span><span class="s2">, </span><span class="s1">name: str) -&gt; Iterator[str]:</span>
+        <span class="s2">yield </span><span class="s1">name</span>
+
+        <span class="s2">if </span><span class="s1">self.extras:</span>
+            <span class="s1">formatted_extras = </span><span class="s4">&quot;,&quot;</span><span class="s1">.join(sorted(self.extras))</span>
+            <span class="s2">yield </span><span class="s4">f&quot;[</span><span class="s2">{</span><span class="s1">formatted_extras</span><span class="s2">}</span><span class="s4">]&quot;</span>
+
+        <span class="s2">if </span><span class="s1">self.specifier:</span>
+            <span class="s2">yield </span><span class="s1">str(self.specifier)</span>
+
+        <span class="s2">if </span><span class="s1">self.url:</span>
+            <span class="s2">yield </span><span class="s4">f&quot;@ </span><span class="s2">{</span><span class="s1">self.url</span><span class="s2">}</span><span class="s4">&quot;</span>
+            <span class="s2">if </span><span class="s1">self.marker:</span>
+                <span class="s2">yield </span><span class="s4">&quot; &quot;</span>
+
+        <span class="s2">if </span><span class="s1">self.marker:</span>
+            <span class="s2">yield </span><span class="s4">f&quot;; </span><span class="s2">{</span><span class="s1">self.marker</span><span class="s2">}</span><span class="s4">&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self) -&gt; str:</span>
+        <span class="s2">return </span><span class="s4">&quot;&quot;</span><span class="s1">.join(self._iter_parts(self.name))</span>
+
+    <span class="s2">def </span><span class="s1">__repr__(self) -&gt; str:</span>
+        <span class="s2">return </span><span class="s4">f&quot;&lt;Requirement('</span><span class="s2">{</span><span class="s1">self</span><span class="s2">}</span><span class="s4">')&gt;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__hash__(self) -&gt; int:</span>
+        <span class="s2">return </span><span class="s1">hash(</span>
+            <span class="s1">(</span>
+                <span class="s1">self.__class__.__name__</span><span class="s2">,</span>
+                <span class="s1">*self._iter_parts(canonicalize_name(self.name))</span><span class="s2">,</span>
+            <span class="s1">)</span>
+        <span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">__eq__(self</span><span class="s2">, </span><span class="s1">other: Any) -&gt; bool:</span>
+        <span class="s2">if not </span><span class="s1">isinstance(other</span><span class="s2">, </span><span class="s1">Requirement):</span>
+            <span class="s2">return </span><span class="s1">NotImplemented</span>
+
+        <span class="s2">return </span><span class="s1">(</span>
+            <span class="s1">canonicalize_name(self.name) == canonicalize_name(other.name)</span>
+            <span class="s2">and </span><span class="s1">self.extras == other.extras</span>
+            <span class="s2">and </span><span class="s1">self.specifier == other.specifier</span>
+            <span class="s2">and </span><span class="s1">self.url == other.url</span>
+            <span class="s2">and </span><span class="s1">self.marker == other.marker</span>
+        <span class="s1">)</span>
+</pre>
+</body>
+</html>

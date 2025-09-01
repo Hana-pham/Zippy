@@ -1,0 +1,252 @@
+<html>
+<head>
+<title>_saferef.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #cc7832;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_saferef.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># extracted from Louie, http://pylouie.org/</span>
+<span class="s0"># updated for Python 3</span>
+<span class="s0">#</span>
+<span class="s0"># Copyright (c) 2006 Patrick K. O'Brien, Mike C. Fletcher,</span>
+<span class="s0">#                    Matthew R. Scott</span>
+<span class="s0">#</span>
+<span class="s0"># Redistribution and use in source and binary forms, with or without</span>
+<span class="s0"># modification, are permitted provided that the following conditions are</span>
+<span class="s0"># met:</span>
+<span class="s0">#</span>
+<span class="s0">#     * Redistributions of source code must retain the above copyright</span>
+<span class="s0">#       notice, this list of conditions and the following disclaimer.</span>
+<span class="s0">#</span>
+<span class="s0">#     * Redistributions in binary form must reproduce the above</span>
+<span class="s0">#       copyright notice, this list of conditions and the following</span>
+<span class="s0">#       disclaimer in the documentation and/or other materials provided</span>
+<span class="s0">#       with the distribution.</span>
+<span class="s0">#</span>
+<span class="s0">#     * Neither the name of the &lt;ORGANIZATION&gt; nor the names of its</span>
+<span class="s0">#       contributors may be used to endorse or promote products derived</span>
+<span class="s0">#       from this software without specific prior written permission.</span>
+<span class="s0">#</span>
+<span class="s0"># THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS</span>
+<span class="s0"># &quot;AS IS&quot; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT</span>
+<span class="s0"># LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR</span>
+<span class="s0"># A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT</span>
+<span class="s0"># OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,</span>
+<span class="s0"># SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT</span>
+<span class="s0"># LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,</span>
+<span class="s0"># DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY</span>
+<span class="s0"># THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT</span>
+<span class="s0"># (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE</span>
+<span class="s0"># OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</span>
+<span class="s0">#</span>
+<span class="s2">&quot;&quot;&quot;Refactored 'safe reference from dispatcher.py&quot;&quot;&quot;</span>
+<span class="s3">import </span><span class="s1">operator</span>
+<span class="s3">import </span><span class="s1">sys</span>
+<span class="s3">import </span><span class="s1">traceback</span>
+<span class="s3">import </span><span class="s1">weakref</span>
+
+
+<span class="s1">get_self = operator.attrgetter(</span><span class="s4">&quot;__self__&quot;</span><span class="s1">)</span>
+<span class="s1">get_func = operator.attrgetter(</span><span class="s4">&quot;__func__&quot;</span><span class="s1">)</span>
+
+
+<span class="s3">def </span><span class="s1">safe_ref(target</span><span class="s3">, </span><span class="s1">on_delete=</span><span class="s3">None</span><span class="s1">):</span>
+    <span class="s2">&quot;&quot;&quot;Return a *safe* weak reference to a callable target. 
+ 
+    - ``target``: The object to be weakly referenced, if it's a bound 
+      method reference, will create a BoundMethodWeakref, otherwise 
+      creates a simple weakref. 
+ 
+    - ``on_delete``: If provided, will have a hard reference stored to 
+      the callable to be called after the safe reference goes out of 
+      scope with the reference object, (either a weakref or a 
+      BoundMethodWeakref) as argument. 
+    &quot;&quot;&quot;</span>
+    <span class="s3">try</span><span class="s1">:</span>
+        <span class="s1">im_self = get_self(target)</span>
+    <span class="s3">except </span><span class="s1">AttributeError:</span>
+        <span class="s3">if </span><span class="s1">callable(on_delete):</span>
+            <span class="s3">return </span><span class="s1">weakref.ref(target</span><span class="s3">, </span><span class="s1">on_delete)</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s3">return </span><span class="s1">weakref.ref(target)</span>
+    <span class="s3">else</span><span class="s1">:</span>
+        <span class="s3">if </span><span class="s1">im_self </span><span class="s3">is not None</span><span class="s1">:</span>
+            <span class="s0"># Turn a bound method into a BoundMethodWeakref instance.</span>
+            <span class="s0"># Keep track of these instances for lookup by disconnect().</span>
+            <span class="s3">assert </span><span class="s1">hasattr(target</span><span class="s3">, </span><span class="s4">&quot;im_func&quot;</span><span class="s1">) </span><span class="s3">or </span><span class="s1">hasattr(target</span><span class="s3">, </span><span class="s4">&quot;__func__&quot;</span><span class="s1">)</span><span class="s3">, </span><span class="s1">(</span>
+                <span class="s4">f&quot;safe_ref target </span><span class="s3">{</span><span class="s1">target</span><span class="s3">!r} </span><span class="s4">has im_self, but no im_func, &quot;</span>
+                <span class="s4">&quot;don't know how to create reference&quot;</span>
+            <span class="s1">)</span>
+            <span class="s1">reference = BoundMethodWeakref(target=target</span><span class="s3">, </span><span class="s1">on_delete=on_delete)</span>
+            <span class="s3">return </span><span class="s1">reference</span>
+
+
+<span class="s3">class </span><span class="s1">BoundMethodWeakref:</span>
+    <span class="s2">&quot;&quot;&quot;'Safe' and reusable weak references to instance methods. 
+ 
+    BoundMethodWeakref objects provide a mechanism for referencing a 
+    bound method without requiring that the method object itself 
+    (which is normally a transient object) is kept alive.  Instead, 
+    the BoundMethodWeakref object keeps weak references to both the 
+    object and the function which together define the instance method. 
+ 
+    Attributes: 
+ 
+    - ``key``: The identity key for the reference, calculated by the 
+      class's calculate_key method applied to the target instance method. 
+ 
+    - ``deletion_methods``: Sequence of callable objects taking single 
+      argument, a reference to this object which will be called when 
+      *either* the target object or target function is garbage 
+      collected (i.e. when this object becomes invalid).  These are 
+      specified as the on_delete parameters of safe_ref calls. 
+ 
+    - ``weak_self``: Weak reference to the target object. 
+ 
+    - ``weak_func``: Weak reference to the target function. 
+ 
+    Class Attributes: 
+ 
+    - ``_all_instances``: Class attribute pointing to all live 
+      BoundMethodWeakref objects indexed by the class's 
+      calculate_key(target) method applied to the target objects. 
+      This weak value dictionary is used to short-circuit creation so 
+      that multiple references to the same (object, function) pair 
+      produce the same BoundMethodWeakref instance. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">_all_instances = weakref.WeakValueDictionary()  </span><span class="s0"># type: ignore[var-annotated]</span>
+
+    <span class="s3">def </span><span class="s1">__new__(cls</span><span class="s3">, </span><span class="s1">target</span><span class="s3">, </span><span class="s1">on_delete=</span><span class="s3">None, </span><span class="s1">*arguments</span><span class="s3">, </span><span class="s1">**named):</span>
+        <span class="s2">&quot;&quot;&quot;Create new instance or return current instance. 
+ 
+        Basically this method of construction allows us to 
+        short-circuit creation of references to already-referenced 
+        instance methods.  The key corresponding to the target is 
+        calculated, and if there is already an existing reference, 
+        that is returned, with its deletion_methods attribute updated. 
+        Otherwise the new instance is created and registered in the 
+        table of already-referenced methods. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">key = cls.calculate_key(target)</span>
+        <span class="s1">current = cls._all_instances.get(key)</span>
+        <span class="s3">if </span><span class="s1">current </span><span class="s3">is not None</span><span class="s1">:</span>
+            <span class="s1">current.deletion_methods.append(on_delete)</span>
+            <span class="s3">return </span><span class="s1">current</span>
+        <span class="s3">else</span><span class="s1">:</span>
+            <span class="s1">base = super().__new__(cls)</span>
+            <span class="s1">cls._all_instances[key] = base</span>
+            <span class="s1">base.__init__(target</span><span class="s3">, </span><span class="s1">on_delete</span><span class="s3">, </span><span class="s1">*arguments</span><span class="s3">, </span><span class="s1">**named)</span>
+            <span class="s3">return </span><span class="s1">base</span>
+
+    <span class="s3">def </span><span class="s1">__init__(self</span><span class="s3">, </span><span class="s1">target</span><span class="s3">, </span><span class="s1">on_delete=</span><span class="s3">None</span><span class="s1">):</span>
+        <span class="s2">&quot;&quot;&quot;Return a weak-reference-like instance for a bound method. 
+ 
+        - ``target``: The instance-method target for the weak reference, 
+          must have im_self and im_func attributes and be 
+          reconstructable via the following, which is true of built-in 
+          instance methods:: 
+ 
+            target.im_func.__get__( target.im_self ) 
+ 
+        - ``on_delete``: Optional callback which will be called when 
+          this weak reference ceases to be valid (i.e. either the 
+          object or the function is garbage collected).  Should take a 
+          single argument, which will be passed a pointer to this 
+          object. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s3">def </span><span class="s1">remove(weak</span><span class="s3">, </span><span class="s1">self=self):</span>
+            <span class="s2">&quot;&quot;&quot;Set self.isDead to True when method or instance is destroyed.&quot;&quot;&quot;</span>
+            <span class="s1">methods = self.deletion_methods[:]</span>
+            <span class="s3">del </span><span class="s1">self.deletion_methods[:]</span>
+            <span class="s3">try</span><span class="s1">:</span>
+                <span class="s3">del </span><span class="s1">self.__class__._all_instances[self.key]</span>
+            <span class="s3">except </span><span class="s1">KeyError:</span>
+                <span class="s3">pass</span>
+            <span class="s3">for </span><span class="s1">function </span><span class="s3">in </span><span class="s1">methods:</span>
+                <span class="s3">try</span><span class="s1">:</span>
+                    <span class="s3">if </span><span class="s1">callable(function):</span>
+                        <span class="s1">function(self)</span>
+                <span class="s3">except </span><span class="s1">Exception:</span>
+                    <span class="s3">try</span><span class="s1">:</span>
+                        <span class="s1">traceback.print_exc()</span>
+                    <span class="s3">except </span><span class="s1">AttributeError:</span>
+                        <span class="s1">e = sys.exc_info()[</span><span class="s5">1</span><span class="s1">]</span>
+                        <span class="s1">print(</span>
+                            <span class="s4">f&quot;Exception during saferef </span><span class="s3">{</span><span class="s1">self</span><span class="s3">} </span><span class="s4">&quot;</span>
+                            <span class="s4">f&quot;cleanup function </span><span class="s3">{</span><span class="s1">function</span><span class="s3">}</span><span class="s4">: </span><span class="s3">{</span><span class="s1">e</span><span class="s3">}</span><span class="s4">&quot;</span>
+                        <span class="s1">)</span>
+
+        <span class="s1">self.deletion_methods = [on_delete]</span>
+        <span class="s1">self.key = self.calculate_key(target)</span>
+        <span class="s1">im_self = get_self(target)</span>
+        <span class="s1">im_func = get_func(target)</span>
+        <span class="s1">self.weak_self = weakref.ref(im_self</span><span class="s3">, </span><span class="s1">remove)</span>
+        <span class="s1">self.weak_func = weakref.ref(im_func</span><span class="s3">, </span><span class="s1">remove)</span>
+        <span class="s1">self.self_name = str(im_self)</span>
+        <span class="s1">self.func_name = str(im_func.__name__)</span>
+
+    <span class="s1">@classmethod</span>
+    <span class="s3">def </span><span class="s1">calculate_key(cls</span><span class="s3">, </span><span class="s1">target):</span>
+        <span class="s2">&quot;&quot;&quot;Calculate the reference key for this reference. 
+ 
+        Currently this is a two-tuple of the id()'s of the target 
+        object and the target function respectively. 
+        &quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">(id(get_self(target))</span><span class="s3">, </span><span class="s1">id(get_func(target)))</span>
+
+    <span class="s3">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">&quot;&quot;&quot;Give a friendly representation of the object.&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s4">&quot;{}({}.{})&quot;</span><span class="s1">.format(</span>
+            <span class="s1">self.__class__.__name__</span><span class="s3">,</span>
+            <span class="s1">self.self_name</span><span class="s3">,</span>
+            <span class="s1">self.func_name</span><span class="s3">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">__repr__ = __str__</span>
+
+    <span class="s3">def </span><span class="s1">__hash__(self):</span>
+        <span class="s3">return </span><span class="s1">hash((self.self_name</span><span class="s3">, </span><span class="s1">self.key))</span>
+
+    <span class="s3">def </span><span class="s1">__nonzero__(self):</span>
+        <span class="s2">&quot;&quot;&quot;Whether we are still a valid reference.&quot;&quot;&quot;</span>
+        <span class="s3">return </span><span class="s1">self() </span><span class="s3">is not None</span>
+
+    <span class="s3">def </span><span class="s1">__eq__(self</span><span class="s3">, </span><span class="s1">other):</span>
+        <span class="s2">&quot;&quot;&quot;Compare with another reference.&quot;&quot;&quot;</span>
+        <span class="s3">if not </span><span class="s1">isinstance(other</span><span class="s3">, </span><span class="s1">self.__class__):</span>
+            <span class="s3">return </span><span class="s1">operator.eq(self.__class__</span><span class="s3">, </span><span class="s1">type(other))</span>
+        <span class="s3">return </span><span class="s1">operator.eq(self.key</span><span class="s3">, </span><span class="s1">other.key)</span>
+
+    <span class="s3">def </span><span class="s1">__call__(self):</span>
+        <span class="s2">&quot;&quot;&quot;Return a strong reference to the bound method. 
+ 
+        If the target cannot be retrieved, then will return None, 
+        otherwise returns a bound instance method for our object and 
+        function. 
+ 
+        Note: You may call this method any number of times, as it does 
+        not invalidate the reference. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">target = self.weak_self()</span>
+        <span class="s3">if </span><span class="s1">target </span><span class="s3">is not None</span><span class="s1">:</span>
+            <span class="s1">function = self.weak_func()</span>
+            <span class="s3">if </span><span class="s1">function </span><span class="s3">is not None</span><span class="s1">:</span>
+                <span class="s3">return </span><span class="s1">function.__get__(target)</span>
+        <span class="s3">return None</span>
+</pre>
+</body>
+</html>

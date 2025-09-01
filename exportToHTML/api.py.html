@@ -1,0 +1,648 @@
+<html>
+<head>
+<title>api.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #629755; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+api.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">from </span><span class="s1">os </span><span class="s0">import </span><span class="s1">PathLike</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">BinaryIO</span><span class="s0">, </span><span class="s1">List</span><span class="s0">, </span><span class="s1">Optional</span><span class="s0">, </span><span class="s1">Set</span><span class="s0">, </span><span class="s1">Union</span>
+
+<span class="s0">from </span><span class="s1">.cd </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">coherence_ratio</span><span class="s0">,</span>
+    <span class="s1">encoding_languages</span><span class="s0">,</span>
+    <span class="s1">mb_encoding_languages</span><span class="s0">,</span>
+    <span class="s1">merge_coherence_ratios</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">.constant </span><span class="s0">import </span><span class="s1">IANA_SUPPORTED</span><span class="s0">, </span><span class="s1">TOO_BIG_SEQUENCE</span><span class="s0">, </span><span class="s1">TOO_SMALL_SEQUENCE</span><span class="s0">, </span><span class="s1">TRACE</span>
+<span class="s0">from </span><span class="s1">.md </span><span class="s0">import </span><span class="s1">mess_ratio</span>
+<span class="s0">from </span><span class="s1">.models </span><span class="s0">import </span><span class="s1">CharsetMatch</span><span class="s0">, </span><span class="s1">CharsetMatches</span>
+<span class="s0">from </span><span class="s1">.utils </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">any_specified_encoding</span><span class="s0">,</span>
+    <span class="s1">cut_sequence_chunks</span><span class="s0">,</span>
+    <span class="s1">iana_name</span><span class="s0">,</span>
+    <span class="s1">identify_sig_or_bom</span><span class="s0">,</span>
+    <span class="s1">is_cp_similar</span><span class="s0">,</span>
+    <span class="s1">is_multi_byte_encoding</span><span class="s0">,</span>
+    <span class="s1">should_strip_sig_or_bom</span><span class="s0">,</span>
+<span class="s1">)</span>
+
+<span class="s2"># Will most likely be controversial</span>
+<span class="s2"># logging.addLevelName(TRACE, &quot;TRACE&quot;)</span>
+<span class="s1">logger = logging.getLogger(</span><span class="s3">&quot;charset_normalizer&quot;</span><span class="s1">)</span>
+<span class="s1">explain_handler = logging.StreamHandler()</span>
+<span class="s1">explain_handler.setFormatter(</span>
+    <span class="s1">logging.Formatter(</span><span class="s3">&quot;%(asctime)s | %(levelname)s | %(message)s&quot;</span><span class="s1">)</span>
+<span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">from_bytes(</span>
+    <span class="s1">sequences: Union[bytes</span><span class="s0">, </span><span class="s1">bytearray]</span><span class="s0">,</span>
+    <span class="s1">steps: int = </span><span class="s4">5</span><span class="s0">,</span>
+    <span class="s1">chunk_size: int = </span><span class="s4">512</span><span class="s0">,</span>
+    <span class="s1">threshold: float = </span><span class="s4">0.2</span><span class="s0">,</span>
+    <span class="s1">cp_isolation: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">cp_exclusion: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">preemptive_behaviour: bool = </span><span class="s0">True,</span>
+    <span class="s1">explain: bool = </span><span class="s0">False,</span>
+    <span class="s1">language_threshold: float = </span><span class="s4">0.1</span><span class="s0">,</span>
+    <span class="s1">enable_fallback: bool = </span><span class="s0">True,</span>
+<span class="s1">) -&gt; CharsetMatches:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Given a raw bytes sequence, return the best possibles charset usable to render str objects. 
+    If there is no results, it is a strong indicator that the source is binary/not text. 
+    By default, the process will extract 5 blocks of 512o each to assess the mess and coherence of a given sequence. 
+    And will give up a particular code page after 20% of measured mess. Those criteria are customizable at will. 
+ 
+    The preemptive behavior DOES NOT replace the traditional detection workflow, it prioritize a particular code page 
+    but never take it for granted. Can improve the performance. 
+ 
+    You may want to focus your attention to some code page or/and not others, use cp_isolation and cp_exclusion for that 
+    purpose. 
+ 
+    This function will strip the SIG in the payload/sequence every time except on UTF-16, UTF-32. 
+    By default the library does not setup any handler other than the NullHandler, if you choose to set the 'explain' 
+    toggle to True it will alter the logger configuration to add a StreamHandler that is suitable for debugging. 
+    Custom logging format and handler can be set manually. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">if not </span><span class="s1">isinstance(sequences</span><span class="s0">, </span><span class="s1">(bytearray</span><span class="s0">, </span><span class="s1">bytes)):</span>
+        <span class="s0">raise </span><span class="s1">TypeError(</span>
+            <span class="s3">&quot;Expected object of type bytes or bytearray, got: {0}&quot;</span><span class="s1">.format(</span>
+                <span class="s1">type(sequences)</span>
+            <span class="s1">)</span>
+        <span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s1">explain:</span>
+        <span class="s1">previous_logger_level: int = logger.level</span>
+        <span class="s1">logger.addHandler(explain_handler)</span>
+        <span class="s1">logger.setLevel(TRACE)</span>
+
+    <span class="s1">length: int = len(sequences)</span>
+
+    <span class="s0">if </span><span class="s1">length == </span><span class="s4">0</span><span class="s1">:</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;Encoding detection on empty bytes, assuming utf_8 intention.&quot;</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">explain:</span>
+            <span class="s1">logger.removeHandler(explain_handler)</span>
+            <span class="s1">logger.setLevel(previous_logger_level </span><span class="s0">or </span><span class="s1">logging.WARNING)</span>
+        <span class="s0">return </span><span class="s1">CharsetMatches([CharsetMatch(sequences</span><span class="s0">, </span><span class="s3">&quot;utf_8&quot;</span><span class="s0">, </span><span class="s4">0.0</span><span class="s0">, False, </span><span class="s1">[]</span><span class="s0">, </span><span class="s3">&quot;&quot;</span><span class="s1">)])</span>
+
+    <span class="s0">if </span><span class="s1">cp_isolation </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;cp_isolation is set. use this flag for debugging purpose. &quot;</span>
+            <span class="s3">&quot;limited list of encoding allowed : %s.&quot;</span><span class="s0">,</span>
+            <span class="s3">&quot;, &quot;</span><span class="s1">.join(cp_isolation)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">cp_isolation = [iana_name(cp</span><span class="s0">, False</span><span class="s1">) </span><span class="s0">for </span><span class="s1">cp </span><span class="s0">in </span><span class="s1">cp_isolation]</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">cp_isolation = []</span>
+
+    <span class="s0">if </span><span class="s1">cp_exclusion </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;cp_exclusion is set. use this flag for debugging purpose. &quot;</span>
+            <span class="s3">&quot;limited list of encoding excluded : %s.&quot;</span><span class="s0">,</span>
+            <span class="s3">&quot;, &quot;</span><span class="s1">.join(cp_exclusion)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">cp_exclusion = [iana_name(cp</span><span class="s0">, False</span><span class="s1">) </span><span class="s0">for </span><span class="s1">cp </span><span class="s0">in </span><span class="s1">cp_exclusion]</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">cp_exclusion = []</span>
+
+    <span class="s0">if </span><span class="s1">length &lt;= (chunk_size * steps):</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;override steps (%i) and chunk_size (%i) as content does not fit (%i byte(s) given) parameters.&quot;</span><span class="s0">,</span>
+            <span class="s1">steps</span><span class="s0">,</span>
+            <span class="s1">chunk_size</span><span class="s0">,</span>
+            <span class="s1">length</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">steps = </span><span class="s4">1</span>
+        <span class="s1">chunk_size = length</span>
+
+    <span class="s0">if </span><span class="s1">steps &gt; </span><span class="s4">1 </span><span class="s0">and </span><span class="s1">length / steps &lt; chunk_size:</span>
+        <span class="s1">chunk_size = int(length / steps)</span>
+
+    <span class="s1">is_too_small_sequence: bool = len(sequences) &lt; TOO_SMALL_SEQUENCE</span>
+    <span class="s1">is_too_large_sequence: bool = len(sequences) &gt;= TOO_BIG_SEQUENCE</span>
+
+    <span class="s0">if </span><span class="s1">is_too_small_sequence:</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;Trying to detect encoding from a tiny portion of ({}) byte(s).&quot;</span><span class="s1">.format(</span>
+                <span class="s1">length</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+    <span class="s0">elif </span><span class="s1">is_too_large_sequence:</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;Using lazy str decoding because the payload is quite large, ({}) byte(s).&quot;</span><span class="s1">.format(</span>
+                <span class="s1">length</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">prioritized_encodings: List[str] = []</span>
+
+    <span class="s1">specified_encoding: Optional[str] = (</span>
+        <span class="s1">any_specified_encoding(sequences) </span><span class="s0">if </span><span class="s1">preemptive_behaviour </span><span class="s0">else None</span>
+    <span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s1">specified_encoding </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s1">prioritized_encodings.append(specified_encoding)</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;Detected declarative mark in sequence. Priority +1 given for %s.&quot;</span><span class="s0">,</span>
+            <span class="s1">specified_encoding</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">tested: Set[str] = set()</span>
+    <span class="s1">tested_but_hard_failure: List[str] = []</span>
+    <span class="s1">tested_but_soft_failure: List[str] = []</span>
+
+    <span class="s1">fallback_ascii: Optional[CharsetMatch] = </span><span class="s0">None</span>
+    <span class="s1">fallback_u8: Optional[CharsetMatch] = </span><span class="s0">None</span>
+    <span class="s1">fallback_specified: Optional[CharsetMatch] = </span><span class="s0">None</span>
+
+    <span class="s1">results: CharsetMatches = CharsetMatches()</span>
+
+    <span class="s1">sig_encoding</span><span class="s0">, </span><span class="s1">sig_payload = identify_sig_or_bom(sequences)</span>
+
+    <span class="s0">if </span><span class="s1">sig_encoding </span><span class="s0">is not None</span><span class="s1">:</span>
+        <span class="s1">prioritized_encodings.append(sig_encoding)</span>
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;Detected a SIG or BOM mark on first %i byte(s). Priority +1 given for %s.&quot;</span><span class="s0">,</span>
+            <span class="s1">len(sig_payload)</span><span class="s0">,</span>
+            <span class="s1">sig_encoding</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">prioritized_encodings.append(</span><span class="s3">&quot;ascii&quot;</span><span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s3">&quot;utf_8&quot; </span><span class="s0">not in </span><span class="s1">prioritized_encodings:</span>
+        <span class="s1">prioritized_encodings.append(</span><span class="s3">&quot;utf_8&quot;</span><span class="s1">)</span>
+
+    <span class="s0">for </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">prioritized_encodings + IANA_SUPPORTED:</span>
+        <span class="s0">if </span><span class="s1">cp_isolation </span><span class="s0">and </span><span class="s1">encoding_iana </span><span class="s0">not in </span><span class="s1">cp_isolation:</span>
+            <span class="s0">continue</span>
+
+        <span class="s0">if </span><span class="s1">cp_exclusion </span><span class="s0">and </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">cp_exclusion:</span>
+            <span class="s0">continue</span>
+
+        <span class="s0">if </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">tested:</span>
+            <span class="s0">continue</span>
+
+        <span class="s1">tested.add(encoding_iana)</span>
+
+        <span class="s1">decoded_payload: Optional[str] = </span><span class="s0">None</span>
+        <span class="s1">bom_or_sig_available: bool = sig_encoding == encoding_iana</span>
+        <span class="s1">strip_sig_or_bom: bool = bom_or_sig_available </span><span class="s0">and </span><span class="s1">should_strip_sig_or_bom(</span>
+            <span class="s1">encoding_iana</span>
+        <span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">{</span><span class="s3">&quot;utf_16&quot;</span><span class="s0">, </span><span class="s3">&quot;utf_32&quot;</span><span class="s1">} </span><span class="s0">and not </span><span class="s1">bom_or_sig_available:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;Encoding %s won't be tested as-is because it require a BOM. Will try some sub-encoder LE/BE.&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s0">continue</span>
+        <span class="s0">if </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">{</span><span class="s3">&quot;utf_7&quot;</span><span class="s1">} </span><span class="s0">and not </span><span class="s1">bom_or_sig_available:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;Encoding %s won't be tested as-is because detection is unreliable without BOM/SIG.&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s0">continue</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">is_multi_byte_decoder: bool = is_multi_byte_encoding(encoding_iana)</span>
+        <span class="s0">except </span><span class="s1">(ModuleNotFoundError</span><span class="s0">, </span><span class="s1">ImportError):</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;Encoding %s does not provide an IncrementalDecoder&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s0">continue</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s0">if </span><span class="s1">is_too_large_sequence </span><span class="s0">and </span><span class="s1">is_multi_byte_decoder </span><span class="s0">is False</span><span class="s1">:</span>
+                <span class="s1">str(</span>
+                    <span class="s1">sequences[: int(</span><span class="s4">50e4</span><span class="s1">)]</span>
+                    <span class="s0">if </span><span class="s1">strip_sig_or_bom </span><span class="s0">is False</span>
+                    <span class="s0">else </span><span class="s1">sequences[len(sig_payload) : int(</span><span class="s4">50e4</span><span class="s1">)]</span><span class="s0">,</span>
+                    <span class="s1">encoding=encoding_iana</span><span class="s0">,</span>
+                <span class="s1">)</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">decoded_payload = str(</span>
+                    <span class="s1">sequences</span>
+                    <span class="s0">if </span><span class="s1">strip_sig_or_bom </span><span class="s0">is False</span>
+                    <span class="s0">else </span><span class="s1">sequences[len(sig_payload) :]</span><span class="s0">,</span>
+                    <span class="s1">encoding=encoding_iana</span><span class="s0">,</span>
+                <span class="s1">)</span>
+        <span class="s0">except </span><span class="s1">(UnicodeDecodeError</span><span class="s0">, </span><span class="s1">LookupError) </span><span class="s0">as </span><span class="s1">e:</span>
+            <span class="s0">if not </span><span class="s1">isinstance(e</span><span class="s0">, </span><span class="s1">LookupError):</span>
+                <span class="s1">logger.log(</span>
+                    <span class="s1">TRACE</span><span class="s0">,</span>
+                    <span class="s3">&quot;Code page %s does not fit given bytes sequence at ALL. %s&quot;</span><span class="s0">,</span>
+                    <span class="s1">encoding_iana</span><span class="s0">,</span>
+                    <span class="s1">str(e)</span><span class="s0">,</span>
+                <span class="s1">)</span>
+            <span class="s1">tested_but_hard_failure.append(encoding_iana)</span>
+            <span class="s0">continue</span>
+
+        <span class="s1">similar_soft_failure_test: bool = </span><span class="s0">False</span>
+
+        <span class="s0">for </span><span class="s1">encoding_soft_failed </span><span class="s0">in </span><span class="s1">tested_but_soft_failure:</span>
+            <span class="s0">if </span><span class="s1">is_cp_similar(encoding_iana</span><span class="s0">, </span><span class="s1">encoding_soft_failed):</span>
+                <span class="s1">similar_soft_failure_test = </span><span class="s0">True</span>
+                <span class="s0">break</span>
+
+        <span class="s0">if </span><span class="s1">similar_soft_failure_test:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;%s is deemed too similar to code page %s and was consider unsuited already. Continuing!&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+                <span class="s1">encoding_soft_failed</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s0">continue</span>
+
+        <span class="s1">r_ = range(</span>
+            <span class="s4">0 </span><span class="s0">if not </span><span class="s1">bom_or_sig_available </span><span class="s0">else </span><span class="s1">len(sig_payload)</span><span class="s0">,</span>
+            <span class="s1">length</span><span class="s0">,</span>
+            <span class="s1">int(length / steps)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">multi_byte_bonus: bool = (</span>
+            <span class="s1">is_multi_byte_decoder</span>
+            <span class="s0">and </span><span class="s1">decoded_payload </span><span class="s0">is not None</span>
+            <span class="s0">and </span><span class="s1">len(decoded_payload) &lt; length</span>
+        <span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">multi_byte_bonus:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;Code page %s is a multi byte encoding table and it appear that at least one character &quot;</span>
+                <span class="s3">&quot;was encoded using n-bytes.&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+        <span class="s1">max_chunk_gave_up: int = int(len(r_) / </span><span class="s4">4</span><span class="s1">)</span>
+
+        <span class="s1">max_chunk_gave_up = max(max_chunk_gave_up</span><span class="s0">, </span><span class="s4">2</span><span class="s1">)</span>
+        <span class="s1">early_stop_count: int = </span><span class="s4">0</span>
+        <span class="s1">lazy_str_hard_failure = </span><span class="s0">False</span>
+
+        <span class="s1">md_chunks: List[str] = []</span>
+        <span class="s1">md_ratios = []</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s0">for </span><span class="s1">chunk </span><span class="s0">in </span><span class="s1">cut_sequence_chunks(</span>
+                <span class="s1">sequences</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+                <span class="s1">r_</span><span class="s0">,</span>
+                <span class="s1">chunk_size</span><span class="s0">,</span>
+                <span class="s1">bom_or_sig_available</span><span class="s0">,</span>
+                <span class="s1">strip_sig_or_bom</span><span class="s0">,</span>
+                <span class="s1">sig_payload</span><span class="s0">,</span>
+                <span class="s1">is_multi_byte_decoder</span><span class="s0">,</span>
+                <span class="s1">decoded_payload</span><span class="s0">,</span>
+            <span class="s1">):</span>
+                <span class="s1">md_chunks.append(chunk)</span>
+
+                <span class="s1">md_ratios.append(</span>
+                    <span class="s1">mess_ratio(</span>
+                        <span class="s1">chunk</span><span class="s0">,</span>
+                        <span class="s1">threshold</span><span class="s0">,</span>
+                        <span class="s1">explain </span><span class="s0">is True and </span><span class="s4">1 </span><span class="s1">&lt;= len(cp_isolation) &lt;= </span><span class="s4">2</span><span class="s0">,</span>
+                    <span class="s1">)</span>
+                <span class="s1">)</span>
+
+                <span class="s0">if </span><span class="s1">md_ratios[-</span><span class="s4">1</span><span class="s1">] &gt;= threshold:</span>
+                    <span class="s1">early_stop_count += </span><span class="s4">1</span>
+
+                <span class="s0">if </span><span class="s1">(early_stop_count &gt;= max_chunk_gave_up) </span><span class="s0">or </span><span class="s1">(</span>
+                    <span class="s1">bom_or_sig_available </span><span class="s0">and </span><span class="s1">strip_sig_or_bom </span><span class="s0">is False</span>
+                <span class="s1">):</span>
+                    <span class="s0">break</span>
+        <span class="s0">except </span><span class="s1">(</span>
+            <span class="s1">UnicodeDecodeError</span>
+        <span class="s1">) </span><span class="s0">as </span><span class="s1">e:  </span><span class="s2"># Lazy str loading may have missed something there</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;LazyStr Loading: After MD chunk decode, code page %s does not fit given bytes sequence at ALL. %s&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+                <span class="s1">str(e)</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s1">early_stop_count = max_chunk_gave_up</span>
+            <span class="s1">lazy_str_hard_failure = </span><span class="s0">True</span>
+
+        <span class="s2"># We might want to check the sequence again with the whole content</span>
+        <span class="s2"># Only if initial MD tests passes</span>
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s0">not </span><span class="s1">lazy_str_hard_failure</span>
+            <span class="s0">and </span><span class="s1">is_too_large_sequence</span>
+            <span class="s0">and not </span><span class="s1">is_multi_byte_decoder</span>
+        <span class="s1">):</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">sequences[int(</span><span class="s4">50e3</span><span class="s1">) :].decode(encoding_iana</span><span class="s0">, </span><span class="s1">errors=</span><span class="s3">&quot;strict&quot;</span><span class="s1">)</span>
+            <span class="s0">except </span><span class="s1">UnicodeDecodeError </span><span class="s0">as </span><span class="s1">e:</span>
+                <span class="s1">logger.log(</span>
+                    <span class="s1">TRACE</span><span class="s0">,</span>
+                    <span class="s3">&quot;LazyStr Loading: After final lookup, code page %s does not fit given bytes sequence at ALL. %s&quot;</span><span class="s0">,</span>
+                    <span class="s1">encoding_iana</span><span class="s0">,</span>
+                    <span class="s1">str(e)</span><span class="s0">,</span>
+                <span class="s1">)</span>
+                <span class="s1">tested_but_hard_failure.append(encoding_iana)</span>
+                <span class="s0">continue</span>
+
+        <span class="s1">mean_mess_ratio: float = sum(md_ratios) / len(md_ratios) </span><span class="s0">if </span><span class="s1">md_ratios </span><span class="s0">else </span><span class="s4">0.0</span>
+        <span class="s0">if </span><span class="s1">mean_mess_ratio &gt;= threshold </span><span class="s0">or </span><span class="s1">early_stop_count &gt;= max_chunk_gave_up:</span>
+            <span class="s1">tested_but_soft_failure.append(encoding_iana)</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;%s was excluded because of initial chaos probing. Gave up %i time(s). &quot;</span>
+                <span class="s3">&quot;Computed mean chaos is %f %%.&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+                <span class="s1">early_stop_count</span><span class="s0">,</span>
+                <span class="s1">round(mean_mess_ratio * </span><span class="s4">100</span><span class="s0">, </span><span class="s1">ndigits=</span><span class="s4">3</span><span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s2"># Preparing those fallbacks in case we got nothing.</span>
+            <span class="s0">if </span><span class="s1">(</span>
+                <span class="s1">enable_fallback</span>
+                <span class="s0">and </span><span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">[</span><span class="s3">&quot;ascii&quot;</span><span class="s0">, </span><span class="s3">&quot;utf_8&quot;</span><span class="s0">, </span><span class="s1">specified_encoding]</span>
+                <span class="s0">and not </span><span class="s1">lazy_str_hard_failure</span>
+            <span class="s1">):</span>
+                <span class="s1">fallback_entry = CharsetMatch(</span>
+                    <span class="s1">sequences</span><span class="s0">, </span><span class="s1">encoding_iana</span><span class="s0">, </span><span class="s1">threshold</span><span class="s0">, False, </span><span class="s1">[]</span><span class="s0">, </span><span class="s1">decoded_payload</span>
+                <span class="s1">)</span>
+                <span class="s0">if </span><span class="s1">encoding_iana == specified_encoding:</span>
+                    <span class="s1">fallback_specified = fallback_entry</span>
+                <span class="s0">elif </span><span class="s1">encoding_iana == </span><span class="s3">&quot;ascii&quot;</span><span class="s1">:</span>
+                    <span class="s1">fallback_ascii = fallback_entry</span>
+                <span class="s0">else</span><span class="s1">:</span>
+                    <span class="s1">fallback_u8 = fallback_entry</span>
+            <span class="s0">continue</span>
+
+        <span class="s1">logger.log(</span>
+            <span class="s1">TRACE</span><span class="s0">,</span>
+            <span class="s3">&quot;%s passed initial chaos probing. Mean measured chaos is %f %%&quot;</span><span class="s0">,</span>
+            <span class="s1">encoding_iana</span><span class="s0">,</span>
+            <span class="s1">round(mean_mess_ratio * </span><span class="s4">100</span><span class="s0">, </span><span class="s1">ndigits=</span><span class="s4">3</span><span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s0">if not </span><span class="s1">is_multi_byte_decoder:</span>
+            <span class="s1">target_languages: List[str] = encoding_languages(encoding_iana)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">target_languages = mb_encoding_languages(encoding_iana)</span>
+
+        <span class="s0">if </span><span class="s1">target_languages:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;{} should target any language(s) of {}&quot;</span><span class="s1">.format(</span>
+                    <span class="s1">encoding_iana</span><span class="s0">, </span><span class="s1">str(target_languages)</span>
+                <span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+        <span class="s1">cd_ratios = []</span>
+
+        <span class="s2"># We shall skip the CD when its about ASCII</span>
+        <span class="s2"># Most of the time its not relevant to run &quot;language-detection&quot; on it.</span>
+        <span class="s0">if </span><span class="s1">encoding_iana != </span><span class="s3">&quot;ascii&quot;</span><span class="s1">:</span>
+            <span class="s0">for </span><span class="s1">chunk </span><span class="s0">in </span><span class="s1">md_chunks:</span>
+                <span class="s1">chunk_languages = coherence_ratio(</span>
+                    <span class="s1">chunk</span><span class="s0">,</span>
+                    <span class="s1">language_threshold</span><span class="s0">,</span>
+                    <span class="s3">&quot;,&quot;</span><span class="s1">.join(target_languages) </span><span class="s0">if </span><span class="s1">target_languages </span><span class="s0">else None,</span>
+                <span class="s1">)</span>
+
+                <span class="s1">cd_ratios.append(chunk_languages)</span>
+
+        <span class="s1">cd_ratios_merged = merge_coherence_ratios(cd_ratios)</span>
+
+        <span class="s0">if </span><span class="s1">cd_ratios_merged:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;We detected language {} using {}&quot;</span><span class="s1">.format(</span>
+                    <span class="s1">cd_ratios_merged</span><span class="s0">, </span><span class="s1">encoding_iana</span>
+                <span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+        <span class="s1">results.append(</span>
+            <span class="s1">CharsetMatch(</span>
+                <span class="s1">sequences</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+                <span class="s1">mean_mess_ratio</span><span class="s0">,</span>
+                <span class="s1">bom_or_sig_available</span><span class="s0">,</span>
+                <span class="s1">cd_ratios_merged</span><span class="s0">,</span>
+                <span class="s1">decoded_payload</span><span class="s0">,</span>
+            <span class="s1">)</span>
+        <span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">encoding_iana </span><span class="s0">in </span><span class="s1">[specified_encoding</span><span class="s0">, </span><span class="s3">&quot;ascii&quot;</span><span class="s0">, </span><span class="s3">&quot;utf_8&quot;</span><span class="s1">]</span>
+            <span class="s0">and </span><span class="s1">mean_mess_ratio &lt; </span><span class="s4">0.1</span>
+        <span class="s1">):</span>
+            <span class="s1">logger.debug(</span>
+                <span class="s3">&quot;Encoding detection: %s is most likely the one.&quot;</span><span class="s0">, </span><span class="s1">encoding_iana</span>
+            <span class="s1">)</span>
+            <span class="s0">if </span><span class="s1">explain:</span>
+                <span class="s1">logger.removeHandler(explain_handler)</span>
+                <span class="s1">logger.setLevel(previous_logger_level)</span>
+            <span class="s0">return </span><span class="s1">CharsetMatches([results[encoding_iana]])</span>
+
+        <span class="s0">if </span><span class="s1">encoding_iana == sig_encoding:</span>
+            <span class="s1">logger.debug(</span>
+                <span class="s3">&quot;Encoding detection: %s is most likely the one as we detected a BOM or SIG within &quot;</span>
+                <span class="s3">&quot;the beginning of the sequence.&quot;</span><span class="s0">,</span>
+                <span class="s1">encoding_iana</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s0">if </span><span class="s1">explain:</span>
+                <span class="s1">logger.removeHandler(explain_handler)</span>
+                <span class="s1">logger.setLevel(previous_logger_level)</span>
+            <span class="s0">return </span><span class="s1">CharsetMatches([results[encoding_iana]])</span>
+
+    <span class="s0">if </span><span class="s1">len(results) == </span><span class="s4">0</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">fallback_u8 </span><span class="s0">or </span><span class="s1">fallback_ascii </span><span class="s0">or </span><span class="s1">fallback_specified:</span>
+            <span class="s1">logger.log(</span>
+                <span class="s1">TRACE</span><span class="s0">,</span>
+                <span class="s3">&quot;Nothing got out of the detection process. Using ASCII/UTF-8/Specified fallback.&quot;</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">fallback_specified:</span>
+            <span class="s1">logger.debug(</span>
+                <span class="s3">&quot;Encoding detection: %s will be used as a fallback match&quot;</span><span class="s0">,</span>
+                <span class="s1">fallback_specified.encoding</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s1">results.append(fallback_specified)</span>
+        <span class="s0">elif </span><span class="s1">(</span>
+            <span class="s1">(fallback_u8 </span><span class="s0">and </span><span class="s1">fallback_ascii </span><span class="s0">is None</span><span class="s1">)</span>
+            <span class="s0">or </span><span class="s1">(</span>
+                <span class="s1">fallback_u8</span>
+                <span class="s0">and </span><span class="s1">fallback_ascii</span>
+                <span class="s0">and </span><span class="s1">fallback_u8.fingerprint != fallback_ascii.fingerprint</span>
+            <span class="s1">)</span>
+            <span class="s0">or </span><span class="s1">(fallback_u8 </span><span class="s0">is not None</span><span class="s1">)</span>
+        <span class="s1">):</span>
+            <span class="s1">logger.debug(</span><span class="s3">&quot;Encoding detection: utf_8 will be used as a fallback match&quot;</span><span class="s1">)</span>
+            <span class="s1">results.append(fallback_u8)</span>
+        <span class="s0">elif </span><span class="s1">fallback_ascii:</span>
+            <span class="s1">logger.debug(</span><span class="s3">&quot;Encoding detection: ascii will be used as a fallback match&quot;</span><span class="s1">)</span>
+            <span class="s1">results.append(fallback_ascii)</span>
+
+    <span class="s0">if </span><span class="s1">results:</span>
+        <span class="s1">logger.debug(</span>
+            <span class="s3">&quot;Encoding detection: Found %s as plausible (best-candidate) for content. With %i alternatives.&quot;</span><span class="s0">,</span>
+            <span class="s1">results.best().encoding</span><span class="s0">,  </span><span class="s2"># type: ignore</span>
+            <span class="s1">len(results) - </span><span class="s4">1</span><span class="s0">,</span>
+        <span class="s1">)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;Encoding detection: Unable to determine any suitable charset.&quot;</span><span class="s1">)</span>
+
+    <span class="s0">if </span><span class="s1">explain:</span>
+        <span class="s1">logger.removeHandler(explain_handler)</span>
+        <span class="s1">logger.setLevel(previous_logger_level)</span>
+
+    <span class="s0">return </span><span class="s1">results</span>
+
+
+<span class="s0">def </span><span class="s1">from_fp(</span>
+    <span class="s1">fp: BinaryIO</span><span class="s0">,</span>
+    <span class="s1">steps: int = </span><span class="s4">5</span><span class="s0">,</span>
+    <span class="s1">chunk_size: int = </span><span class="s4">512</span><span class="s0">,</span>
+    <span class="s1">threshold: float = </span><span class="s4">0.20</span><span class="s0">,</span>
+    <span class="s1">cp_isolation: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">cp_exclusion: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">preemptive_behaviour: bool = </span><span class="s0">True,</span>
+    <span class="s1">explain: bool = </span><span class="s0">False,</span>
+    <span class="s1">language_threshold: float = </span><span class="s4">0.1</span><span class="s0">,</span>
+    <span class="s1">enable_fallback: bool = </span><span class="s0">True,</span>
+<span class="s1">) -&gt; CharsetMatches:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Same thing than the function from_bytes but using a file pointer that is already ready. 
+    Will not close the file pointer. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">from_bytes(</span>
+        <span class="s1">fp.read()</span><span class="s0">,</span>
+        <span class="s1">steps</span><span class="s0">,</span>
+        <span class="s1">chunk_size</span><span class="s0">,</span>
+        <span class="s1">threshold</span><span class="s0">,</span>
+        <span class="s1">cp_isolation</span><span class="s0">,</span>
+        <span class="s1">cp_exclusion</span><span class="s0">,</span>
+        <span class="s1">preemptive_behaviour</span><span class="s0">,</span>
+        <span class="s1">explain</span><span class="s0">,</span>
+        <span class="s1">language_threshold</span><span class="s0">,</span>
+        <span class="s1">enable_fallback</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">from_path(</span>
+    <span class="s1">path: Union[str</span><span class="s0">, </span><span class="s1">bytes</span><span class="s0">, </span><span class="s1">PathLike]</span><span class="s0">,  </span><span class="s2"># type: ignore[type-arg]</span>
+    <span class="s1">steps: int = </span><span class="s4">5</span><span class="s0">,</span>
+    <span class="s1">chunk_size: int = </span><span class="s4">512</span><span class="s0">,</span>
+    <span class="s1">threshold: float = </span><span class="s4">0.20</span><span class="s0">,</span>
+    <span class="s1">cp_isolation: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">cp_exclusion: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">preemptive_behaviour: bool = </span><span class="s0">True,</span>
+    <span class="s1">explain: bool = </span><span class="s0">False,</span>
+    <span class="s1">language_threshold: float = </span><span class="s4">0.1</span><span class="s0">,</span>
+    <span class="s1">enable_fallback: bool = </span><span class="s0">True,</span>
+<span class="s1">) -&gt; CharsetMatches:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Same thing than the function from_bytes but with one extra step. Opening and reading given file path in binary mode. 
+    Can raise IOError. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">with </span><span class="s1">open(path</span><span class="s0">, </span><span class="s3">&quot;rb&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">fp:</span>
+        <span class="s0">return </span><span class="s1">from_fp(</span>
+            <span class="s1">fp</span><span class="s0">,</span>
+            <span class="s1">steps</span><span class="s0">,</span>
+            <span class="s1">chunk_size</span><span class="s0">,</span>
+            <span class="s1">threshold</span><span class="s0">,</span>
+            <span class="s1">cp_isolation</span><span class="s0">,</span>
+            <span class="s1">cp_exclusion</span><span class="s0">,</span>
+            <span class="s1">preemptive_behaviour</span><span class="s0">,</span>
+            <span class="s1">explain</span><span class="s0">,</span>
+            <span class="s1">language_threshold</span><span class="s0">,</span>
+            <span class="s1">enable_fallback</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">is_binary(</span>
+    <span class="s1">fp_or_path_or_payload: Union[PathLike</span><span class="s0">, </span><span class="s1">str</span><span class="s0">, </span><span class="s1">BinaryIO</span><span class="s0">, </span><span class="s1">bytes]</span><span class="s0">,  </span><span class="s2"># type: ignore[type-arg]</span>
+    <span class="s1">steps: int = </span><span class="s4">5</span><span class="s0">,</span>
+    <span class="s1">chunk_size: int = </span><span class="s4">512</span><span class="s0">,</span>
+    <span class="s1">threshold: float = </span><span class="s4">0.20</span><span class="s0">,</span>
+    <span class="s1">cp_isolation: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">cp_exclusion: Optional[List[str]] = </span><span class="s0">None,</span>
+    <span class="s1">preemptive_behaviour: bool = </span><span class="s0">True,</span>
+    <span class="s1">explain: bool = </span><span class="s0">False,</span>
+    <span class="s1">language_threshold: float = </span><span class="s4">0.1</span><span class="s0">,</span>
+    <span class="s1">enable_fallback: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; bool:</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Detect if the given input (file, bytes, or path) points to a binary file. aka. not a string. 
+    Based on the same main heuristic algorithms and default kwargs at the sole exception that fallbacks match 
+    are disabled to be stricter around ASCII-compatible but unlikely to be a string. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">isinstance(fp_or_path_or_payload</span><span class="s0">, </span><span class="s1">(str</span><span class="s0">, </span><span class="s1">PathLike)):</span>
+        <span class="s1">guesses = from_path(</span>
+            <span class="s1">fp_or_path_or_payload</span><span class="s0">,</span>
+            <span class="s1">steps=steps</span><span class="s0">,</span>
+            <span class="s1">chunk_size=chunk_size</span><span class="s0">,</span>
+            <span class="s1">threshold=threshold</span><span class="s0">,</span>
+            <span class="s1">cp_isolation=cp_isolation</span><span class="s0">,</span>
+            <span class="s1">cp_exclusion=cp_exclusion</span><span class="s0">,</span>
+            <span class="s1">preemptive_behaviour=preemptive_behaviour</span><span class="s0">,</span>
+            <span class="s1">explain=explain</span><span class="s0">,</span>
+            <span class="s1">language_threshold=language_threshold</span><span class="s0">,</span>
+            <span class="s1">enable_fallback=enable_fallback</span><span class="s0">,</span>
+        <span class="s1">)</span>
+    <span class="s0">elif </span><span class="s1">isinstance(</span>
+        <span class="s1">fp_or_path_or_payload</span><span class="s0">,</span>
+        <span class="s1">(</span>
+            <span class="s1">bytes</span><span class="s0">,</span>
+            <span class="s1">bytearray</span><span class="s0">,</span>
+        <span class="s1">)</span><span class="s0">,</span>
+    <span class="s1">):</span>
+        <span class="s1">guesses = from_bytes(</span>
+            <span class="s1">fp_or_path_or_payload</span><span class="s0">,</span>
+            <span class="s1">steps=steps</span><span class="s0">,</span>
+            <span class="s1">chunk_size=chunk_size</span><span class="s0">,</span>
+            <span class="s1">threshold=threshold</span><span class="s0">,</span>
+            <span class="s1">cp_isolation=cp_isolation</span><span class="s0">,</span>
+            <span class="s1">cp_exclusion=cp_exclusion</span><span class="s0">,</span>
+            <span class="s1">preemptive_behaviour=preemptive_behaviour</span><span class="s0">,</span>
+            <span class="s1">explain=explain</span><span class="s0">,</span>
+            <span class="s1">language_threshold=language_threshold</span><span class="s0">,</span>
+            <span class="s1">enable_fallback=enable_fallback</span><span class="s0">,</span>
+        <span class="s1">)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">guesses = from_fp(</span>
+            <span class="s1">fp_or_path_or_payload</span><span class="s0">,</span>
+            <span class="s1">steps=steps</span><span class="s0">,</span>
+            <span class="s1">chunk_size=chunk_size</span><span class="s0">,</span>
+            <span class="s1">threshold=threshold</span><span class="s0">,</span>
+            <span class="s1">cp_isolation=cp_isolation</span><span class="s0">,</span>
+            <span class="s1">cp_exclusion=cp_exclusion</span><span class="s0">,</span>
+            <span class="s1">preemptive_behaviour=preemptive_behaviour</span><span class="s0">,</span>
+            <span class="s1">explain=explain</span><span class="s0">,</span>
+            <span class="s1">language_threshold=language_threshold</span><span class="s0">,</span>
+            <span class="s1">enable_fallback=enable_fallback</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s0">return not </span><span class="s1">guesses</span>
+</pre>
+</body>
+</html>

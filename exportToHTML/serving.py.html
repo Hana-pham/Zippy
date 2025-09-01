@@ -1,0 +1,1132 @@
+<html>
+<head>
+<title>serving.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #629755; font-style: italic;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #808080;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+serving.py</font>
+</center></td></tr></table>
+<pre><span class="s0">&quot;&quot;&quot;A WSGI and HTTP server for use **during development only**. This 
+server is convenient to use, but is not designed to be particularly 
+stable, secure, or efficient. Use a dedicate WSGI server and HTTP 
+server when deploying to production. 
+ 
+It provides features like interactive debugging and code reloading. Use 
+``run_simple`` to start the server. Put this in a ``run.py`` script: 
+ 
+.. code-block:: python 
+ 
+    from myapp import create_app 
+    from werkzeug import run_simple 
+&quot;&quot;&quot;</span>
+<span class="s2">from </span><span class="s1">__future__ </span><span class="s2">import </span><span class="s1">annotations</span>
+
+<span class="s2">import </span><span class="s1">errno</span>
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">selectors</span>
+<span class="s2">import </span><span class="s1">socket</span>
+<span class="s2">import </span><span class="s1">socketserver</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">typing </span><span class="s2">as </span><span class="s1">t</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime </span><span class="s2">as </span><span class="s1">dt</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">timedelta</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">timezone</span>
+<span class="s2">from </span><span class="s1">http.server </span><span class="s2">import </span><span class="s1">BaseHTTPRequestHandler</span>
+<span class="s2">from </span><span class="s1">http.server </span><span class="s2">import </span><span class="s1">HTTPServer</span>
+<span class="s2">from </span><span class="s1">urllib.parse </span><span class="s2">import </span><span class="s1">unquote</span>
+<span class="s2">from </span><span class="s1">urllib.parse </span><span class="s2">import </span><span class="s1">urlsplit</span>
+
+<span class="s2">from </span><span class="s1">._internal </span><span class="s2">import </span><span class="s1">_log</span>
+<span class="s2">from </span><span class="s1">._internal </span><span class="s2">import </span><span class="s1">_wsgi_encoding_dance</span>
+<span class="s2">from </span><span class="s1">.exceptions </span><span class="s2">import </span><span class="s1">InternalServerError</span>
+<span class="s2">from </span><span class="s1">.urls </span><span class="s2">import </span><span class="s1">uri_to_iri</span>
+
+<span class="s2">try</span><span class="s1">:</span>
+    <span class="s2">import </span><span class="s1">ssl</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+
+    <span class="s2">class </span><span class="s1">_SslDummy:</span>
+        <span class="s2">def </span><span class="s1">__getattr__(self</span><span class="s2">, </span><span class="s1">name: str) -&gt; t.Any:</span>
+            <span class="s2">raise </span><span class="s1">RuntimeError(  </span><span class="s3"># noqa: B904</span>
+                <span class="s4">&quot;SSL is unavailable because this Python runtime was not&quot;</span>
+                <span class="s4">&quot; compiled with SSL/TLS support.&quot;</span>
+            <span class="s1">)</span>
+
+    <span class="s1">ssl = _SslDummy()  </span><span class="s3"># type: ignore</span>
+
+<span class="s1">_log_add_style = </span><span class="s2">True</span>
+
+<span class="s2">if </span><span class="s1">os.name == </span><span class="s4">&quot;nt&quot;</span><span class="s1">:</span>
+    <span class="s2">try</span><span class="s1">:</span>
+        <span class="s1">__import__(</span><span class="s4">&quot;colorama&quot;</span><span class="s1">)</span>
+    <span class="s2">except </span><span class="s1">ImportError:</span>
+        <span class="s1">_log_add_style = </span><span class="s2">False</span>
+
+<span class="s1">can_fork = hasattr(os</span><span class="s2">, </span><span class="s4">&quot;fork&quot;</span><span class="s1">)</span>
+
+<span class="s2">if </span><span class="s1">can_fork:</span>
+    <span class="s1">ForkingMixIn = socketserver.ForkingMixIn</span>
+<span class="s2">else</span><span class="s1">:</span>
+
+    <span class="s2">class </span><span class="s1">ForkingMixIn:  </span><span class="s3"># type: ignore</span>
+        <span class="s2">pass</span>
+
+
+<span class="s2">try</span><span class="s1">:</span>
+    <span class="s1">af_unix = socket.AF_UNIX</span>
+<span class="s2">except </span><span class="s1">AttributeError:</span>
+    <span class="s1">af_unix = </span><span class="s2">None  </span><span class="s3"># type: ignore</span>
+
+<span class="s1">LISTEN_QUEUE = </span><span class="s5">128</span>
+
+<span class="s1">_TSSLContextArg = t.Optional[</span>
+    <span class="s1">t.Union[</span><span class="s4">&quot;ssl.SSLContext&quot;</span><span class="s2">, </span><span class="s1">t.Tuple[str</span><span class="s2">, </span><span class="s1">t.Optional[str]]</span><span class="s2">, </span><span class="s1">t.Literal[</span><span class="s4">&quot;adhoc&quot;</span><span class="s1">]]</span>
+<span class="s1">]</span>
+
+<span class="s2">if </span><span class="s1">t.TYPE_CHECKING:</span>
+    <span class="s2">from </span><span class="s1">_typeshed.wsgi </span><span class="s2">import </span><span class="s1">WSGIApplication</span>
+    <span class="s2">from </span><span class="s1">_typeshed.wsgi </span><span class="s2">import </span><span class="s1">WSGIEnvironment</span>
+    <span class="s2">from </span><span class="s1">cryptography.hazmat.primitives.asymmetric.rsa </span><span class="s2">import </span><span class="s1">(</span>
+        <span class="s1">RSAPrivateKeyWithSerialization</span><span class="s2">,</span>
+    <span class="s1">)</span>
+    <span class="s2">from </span><span class="s1">cryptography.x509 </span><span class="s2">import </span><span class="s1">Certificate</span>
+
+
+<span class="s2">class </span><span class="s1">DechunkedInput(io.RawIOBase):</span>
+    <span class="s0">&quot;&quot;&quot;An input stream that handles Transfer-Encoding 'chunked'&quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">rfile: t.IO[bytes]) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s1">self._rfile = rfile</span>
+        <span class="s1">self._done = </span><span class="s2">False</span>
+        <span class="s1">self._len = </span><span class="s5">0</span>
+
+    <span class="s2">def </span><span class="s1">readable(self) -&gt; bool:</span>
+        <span class="s2">return True</span>
+
+    <span class="s2">def </span><span class="s1">read_chunk_len(self) -&gt; int:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">line = self._rfile.readline().decode(</span><span class="s4">&quot;latin1&quot;</span><span class="s1">)</span>
+            <span class="s1">_len = int(line.strip()</span><span class="s2">, </span><span class="s5">16</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">ValueError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">raise </span><span class="s1">OSError(</span><span class="s4">&quot;Invalid chunk header&quot;</span><span class="s1">) </span><span class="s2">from </span><span class="s1">e</span>
+        <span class="s2">if </span><span class="s1">_len &lt; </span><span class="s5">0</span><span class="s1">:</span>
+            <span class="s2">raise </span><span class="s1">OSError(</span><span class="s4">&quot;Negative chunk length not allowed&quot;</span><span class="s1">)</span>
+        <span class="s2">return </span><span class="s1">_len</span>
+
+    <span class="s2">def </span><span class="s1">readinto(self</span><span class="s2">, </span><span class="s1">buf: bytearray) -&gt; int:  </span><span class="s3"># type: ignore</span>
+        <span class="s1">read = </span><span class="s5">0</span>
+        <span class="s2">while not </span><span class="s1">self._done </span><span class="s2">and </span><span class="s1">read &lt; len(buf):</span>
+            <span class="s2">if </span><span class="s1">self._len == </span><span class="s5">0</span><span class="s1">:</span>
+                <span class="s3"># This is the first chunk or we fully consumed the previous</span>
+                <span class="s3"># one. Read the next length of the next chunk</span>
+                <span class="s1">self._len = self.read_chunk_len()</span>
+
+            <span class="s2">if </span><span class="s1">self._len == </span><span class="s5">0</span><span class="s1">:</span>
+                <span class="s3"># Found the final chunk of size 0. The stream is now exhausted,</span>
+                <span class="s3"># but there is still a final newline that should be consumed</span>
+                <span class="s1">self._done = </span><span class="s2">True</span>
+
+            <span class="s2">if </span><span class="s1">self._len &gt; </span><span class="s5">0</span><span class="s1">:</span>
+                <span class="s3"># There is data (left) in this chunk, so append it to the</span>
+                <span class="s3"># buffer. If this operation fully consumes the chunk, this will</span>
+                <span class="s3"># reset self._len to 0.</span>
+                <span class="s1">n = min(len(buf)</span><span class="s2">, </span><span class="s1">self._len)</span>
+
+                <span class="s3"># If (read + chunk size) becomes more than len(buf), buf will</span>
+                <span class="s3"># grow beyond the original size and read more data than</span>
+                <span class="s3"># required. So only read as much data as can fit in buf.</span>
+                <span class="s2">if </span><span class="s1">read + n &gt; len(buf):</span>
+                    <span class="s1">buf[read:] = self._rfile.read(len(buf) - read)</span>
+                    <span class="s1">self._len -= len(buf) - read</span>
+                    <span class="s1">read = len(buf)</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s1">buf[read : read + n] = self._rfile.read(n)</span>
+                    <span class="s1">self._len -= n</span>
+                    <span class="s1">read += n</span>
+
+            <span class="s2">if </span><span class="s1">self._len == </span><span class="s5">0</span><span class="s1">:</span>
+                <span class="s3"># Skip the terminating newline of a chunk that has been fully</span>
+                <span class="s3"># consumed. This also applies to the 0-sized final chunk</span>
+                <span class="s1">terminator = self._rfile.readline()</span>
+                <span class="s2">if </span><span class="s1">terminator </span><span class="s2">not in </span><span class="s1">(</span><span class="s6">b&quot;</span><span class="s2">\n</span><span class="s6">&quot;</span><span class="s2">, </span><span class="s6">b&quot;</span><span class="s2">\r\n</span><span class="s6">&quot;</span><span class="s2">, </span><span class="s6">b&quot;</span><span class="s2">\r</span><span class="s6">&quot;</span><span class="s1">):</span>
+                    <span class="s2">raise </span><span class="s1">OSError(</span><span class="s4">&quot;Missing chunk terminating newline&quot;</span><span class="s1">)</span>
+
+        <span class="s2">return </span><span class="s1">read</span>
+
+
+<span class="s2">class </span><span class="s1">WSGIRequestHandler(BaseHTTPRequestHandler):</span>
+    <span class="s0">&quot;&quot;&quot;A request handler that implements WSGI dispatching.&quot;&quot;&quot;</span>
+
+    <span class="s1">server: BaseWSGIServer</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">server_version(self) -&gt; str:  </span><span class="s3"># type: ignore</span>
+        <span class="s2">return </span><span class="s1">self.server._server_version</span>
+
+    <span class="s2">def </span><span class="s1">make_environ(self) -&gt; WSGIEnvironment:</span>
+        <span class="s1">request_url = urlsplit(self.path)</span>
+        <span class="s1">url_scheme = </span><span class="s4">&quot;http&quot; </span><span class="s2">if </span><span class="s1">self.server.ssl_context </span><span class="s2">is None else </span><span class="s4">&quot;https&quot;</span>
+
+        <span class="s2">if not </span><span class="s1">self.client_address:</span>
+            <span class="s1">self.client_address = (</span><span class="s4">&quot;&lt;local&gt;&quot;</span><span class="s2">, </span><span class="s5">0</span><span class="s1">)</span>
+        <span class="s2">elif </span><span class="s1">isinstance(self.client_address</span><span class="s2">, </span><span class="s1">str):</span>
+            <span class="s1">self.client_address = (self.client_address</span><span class="s2">, </span><span class="s5">0</span><span class="s1">)</span>
+
+        <span class="s3"># If there was no scheme but the path started with two slashes,</span>
+        <span class="s3"># the first segment may have been incorrectly parsed as the</span>
+        <span class="s3"># netloc, prepend it to the path again.</span>
+        <span class="s2">if not </span><span class="s1">request_url.scheme </span><span class="s2">and </span><span class="s1">request_url.netloc:</span>
+            <span class="s1">path_info = </span><span class="s4">f&quot;/</span><span class="s2">{</span><span class="s1">request_url.netloc</span><span class="s2">}{</span><span class="s1">request_url.path</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">path_info = request_url.path</span>
+
+        <span class="s1">path_info = unquote(path_info)</span>
+
+        <span class="s1">environ: WSGIEnvironment = {</span>
+            <span class="s4">&quot;wsgi.version&quot;</span><span class="s1">: (</span><span class="s5">1</span><span class="s2">, </span><span class="s5">0</span><span class="s1">)</span><span class="s2">,</span>
+            <span class="s4">&quot;wsgi.url_scheme&quot;</span><span class="s1">: url_scheme</span><span class="s2">,</span>
+            <span class="s4">&quot;wsgi.input&quot;</span><span class="s1">: self.rfile</span><span class="s2">,</span>
+            <span class="s4">&quot;wsgi.errors&quot;</span><span class="s1">: sys.stderr</span><span class="s2">,</span>
+            <span class="s4">&quot;wsgi.multithread&quot;</span><span class="s1">: self.server.multithread</span><span class="s2">,</span>
+            <span class="s4">&quot;wsgi.multiprocess&quot;</span><span class="s1">: self.server.multiprocess</span><span class="s2">,</span>
+            <span class="s4">&quot;wsgi.run_once&quot;</span><span class="s1">: </span><span class="s2">False,</span>
+            <span class="s4">&quot;werkzeug.socket&quot;</span><span class="s1">: self.connection</span><span class="s2">,</span>
+            <span class="s4">&quot;SERVER_SOFTWARE&quot;</span><span class="s1">: self.server_version</span><span class="s2">,</span>
+            <span class="s4">&quot;REQUEST_METHOD&quot;</span><span class="s1">: self.command</span><span class="s2">,</span>
+            <span class="s4">&quot;SCRIPT_NAME&quot;</span><span class="s1">: </span><span class="s4">&quot;&quot;</span><span class="s2">,</span>
+            <span class="s4">&quot;PATH_INFO&quot;</span><span class="s1">: _wsgi_encoding_dance(path_info)</span><span class="s2">,</span>
+            <span class="s4">&quot;QUERY_STRING&quot;</span><span class="s1">: _wsgi_encoding_dance(request_url.query)</span><span class="s2">,</span>
+            <span class="s3"># Non-standard, added by mod_wsgi, uWSGI</span>
+            <span class="s4">&quot;REQUEST_URI&quot;</span><span class="s1">: _wsgi_encoding_dance(self.path)</span><span class="s2">,</span>
+            <span class="s3"># Non-standard, added by gunicorn</span>
+            <span class="s4">&quot;RAW_URI&quot;</span><span class="s1">: _wsgi_encoding_dance(self.path)</span><span class="s2">,</span>
+            <span class="s4">&quot;REMOTE_ADDR&quot;</span><span class="s1">: self.address_string()</span><span class="s2">,</span>
+            <span class="s4">&quot;REMOTE_PORT&quot;</span><span class="s1">: self.port_integer()</span><span class="s2">,</span>
+            <span class="s4">&quot;SERVER_NAME&quot;</span><span class="s1">: self.server.server_address[</span><span class="s5">0</span><span class="s1">]</span><span class="s2">,</span>
+            <span class="s4">&quot;SERVER_PORT&quot;</span><span class="s1">: str(self.server.server_address[</span><span class="s5">1</span><span class="s1">])</span><span class="s2">,</span>
+            <span class="s4">&quot;SERVER_PROTOCOL&quot;</span><span class="s1">: self.request_version</span><span class="s2">,</span>
+        <span class="s1">}</span>
+
+        <span class="s2">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">self.headers.items():</span>
+            <span class="s2">if </span><span class="s4">&quot;_&quot; </span><span class="s2">in </span><span class="s1">key:</span>
+                <span class="s2">continue</span>
+
+            <span class="s1">key = key.upper().replace(</span><span class="s4">&quot;-&quot;</span><span class="s2">, </span><span class="s4">&quot;_&quot;</span><span class="s1">)</span>
+            <span class="s1">value = value.replace(</span><span class="s4">&quot;</span><span class="s2">\r\n</span><span class="s4">&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s1">)</span>
+            <span class="s2">if </span><span class="s1">key </span><span class="s2">not in </span><span class="s1">(</span><span class="s4">&quot;CONTENT_TYPE&quot;</span><span class="s2">, </span><span class="s4">&quot;CONTENT_LENGTH&quot;</span><span class="s1">):</span>
+                <span class="s1">key = </span><span class="s4">f&quot;HTTP_</span><span class="s2">{</span><span class="s1">key</span><span class="s2">}</span><span class="s4">&quot;</span>
+                <span class="s2">if </span><span class="s1">key </span><span class="s2">in </span><span class="s1">environ:</span>
+                    <span class="s1">value = </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">environ[key]</span><span class="s2">}</span><span class="s4">,</span><span class="s2">{</span><span class="s1">value</span><span class="s2">}</span><span class="s4">&quot;</span>
+            <span class="s1">environ[key] = value</span>
+
+        <span class="s2">if </span><span class="s1">environ.get(</span><span class="s4">&quot;HTTP_TRANSFER_ENCODING&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s1">).strip().lower() == </span><span class="s4">&quot;chunked&quot;</span><span class="s1">:</span>
+            <span class="s1">environ[</span><span class="s4">&quot;wsgi.input_terminated&quot;</span><span class="s1">] = </span><span class="s2">True</span>
+            <span class="s1">environ[</span><span class="s4">&quot;wsgi.input&quot;</span><span class="s1">] = DechunkedInput(environ[</span><span class="s4">&quot;wsgi.input&quot;</span><span class="s1">])</span>
+
+        <span class="s3"># Per RFC 2616, if the URL is absolute, use that as the host.</span>
+        <span class="s3"># We're using &quot;has a scheme&quot; to indicate an absolute URL.</span>
+        <span class="s2">if </span><span class="s1">request_url.scheme </span><span class="s2">and </span><span class="s1">request_url.netloc:</span>
+            <span class="s1">environ[</span><span class="s4">&quot;HTTP_HOST&quot;</span><span class="s1">] = request_url.netloc</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s3"># binary_form=False gives nicer information, but wouldn't be compatible with</span>
+            <span class="s3"># what Nginx or Apache could return.</span>
+            <span class="s1">peer_cert = self.connection.getpeercert(binary_form=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s2">if </span><span class="s1">peer_cert </span><span class="s2">is not None</span><span class="s1">:</span>
+                <span class="s3"># Nginx and Apache use PEM format.</span>
+                <span class="s1">environ[</span><span class="s4">&quot;SSL_CLIENT_CERT&quot;</span><span class="s1">] = ssl.DER_cert_to_PEM_cert(peer_cert)</span>
+        <span class="s2">except </span><span class="s1">ValueError:</span>
+            <span class="s3"># SSL handshake hasn't finished.</span>
+            <span class="s1">self.server.log(</span><span class="s4">&quot;error&quot;</span><span class="s2">, </span><span class="s4">&quot;Cannot fetch SSL peer certificate info&quot;</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">AttributeError:</span>
+            <span class="s3"># Not using TLS, the socket will not have getpeercert().</span>
+            <span class="s2">pass</span>
+
+        <span class="s2">return </span><span class="s1">environ</span>
+
+    <span class="s2">def </span><span class="s1">run_wsgi(self) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">if </span><span class="s1">self.headers.get(</span><span class="s4">&quot;Expect&quot;</span><span class="s2">, </span><span class="s4">&quot;&quot;</span><span class="s1">).lower().strip() == </span><span class="s4">&quot;100-continue&quot;</span><span class="s1">:</span>
+            <span class="s1">self.wfile.write(</span><span class="s6">b&quot;HTTP/1.1 100 Continue</span><span class="s2">\r\n\r\n</span><span class="s6">&quot;</span><span class="s1">)</span>
+
+        <span class="s1">self.environ = environ = self.make_environ()</span>
+        <span class="s1">status_set: str | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+        <span class="s1">headers_set: list[tuple[str</span><span class="s2">, </span><span class="s1">str]] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+        <span class="s1">status_sent: str | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+        <span class="s1">headers_sent: list[tuple[str</span><span class="s2">, </span><span class="s1">str]] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+        <span class="s1">chunk_response: bool = </span><span class="s2">False</span>
+
+        <span class="s2">def </span><span class="s1">write(data: bytes) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+            <span class="s2">nonlocal </span><span class="s1">status_sent</span><span class="s2">, </span><span class="s1">headers_sent</span><span class="s2">, </span><span class="s1">chunk_response</span>
+            <span class="s2">assert </span><span class="s1">status_set </span><span class="s2">is not None, </span><span class="s4">&quot;write() before start_response&quot;</span>
+            <span class="s2">assert </span><span class="s1">headers_set </span><span class="s2">is not None, </span><span class="s4">&quot;write() before start_response&quot;</span>
+            <span class="s2">if </span><span class="s1">status_sent </span><span class="s2">is None</span><span class="s1">:</span>
+                <span class="s1">status_sent = status_set</span>
+                <span class="s1">headers_sent = headers_set</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s1">code_str</span><span class="s2">, </span><span class="s1">msg = status_sent.split(</span><span class="s2">None, </span><span class="s5">1</span><span class="s1">)</span>
+                <span class="s2">except </span><span class="s1">ValueError:</span>
+                    <span class="s1">code_str</span><span class="s2">, </span><span class="s1">msg = status_sent</span><span class="s2">, </span><span class="s4">&quot;&quot;</span>
+                <span class="s1">code = int(code_str)</span>
+                <span class="s1">self.send_response(code</span><span class="s2">, </span><span class="s1">msg)</span>
+                <span class="s1">header_keys = set()</span>
+                <span class="s2">for </span><span class="s1">key</span><span class="s2">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">headers_sent:</span>
+                    <span class="s1">self.send_header(key</span><span class="s2">, </span><span class="s1">value)</span>
+                    <span class="s1">header_keys.add(key.lower())</span>
+
+                <span class="s3"># Use chunked transfer encoding if there is no content</span>
+                <span class="s3"># length. Do not use for 1xx and 204 responses. 304</span>
+                <span class="s3"># responses and HEAD requests are also excluded, which</span>
+                <span class="s3"># is the more conservative behavior and matches other</span>
+                <span class="s3"># parts of the code.</span>
+                <span class="s3"># https://httpwg.org/specs/rfc7230.html#rfc.section.3.3.1</span>
+                <span class="s2">if </span><span class="s1">(</span>
+                    <span class="s2">not </span><span class="s1">(</span>
+                        <span class="s4">&quot;content-length&quot; </span><span class="s2">in </span><span class="s1">header_keys</span>
+                        <span class="s2">or </span><span class="s1">environ[</span><span class="s4">&quot;REQUEST_METHOD&quot;</span><span class="s1">] == </span><span class="s4">&quot;HEAD&quot;</span>
+                        <span class="s2">or </span><span class="s1">(</span><span class="s5">100 </span><span class="s1">&lt;= code &lt; </span><span class="s5">200</span><span class="s1">)</span>
+                        <span class="s2">or </span><span class="s1">code </span><span class="s2">in </span><span class="s1">{</span><span class="s5">204</span><span class="s2">, </span><span class="s5">304</span><span class="s1">}</span>
+                    <span class="s1">)</span>
+                    <span class="s2">and </span><span class="s1">self.protocol_version &gt;= </span><span class="s4">&quot;HTTP/1.1&quot;</span>
+                <span class="s1">):</span>
+                    <span class="s1">chunk_response = </span><span class="s2">True</span>
+                    <span class="s1">self.send_header(</span><span class="s4">&quot;Transfer-Encoding&quot;</span><span class="s2">, </span><span class="s4">&quot;chunked&quot;</span><span class="s1">)</span>
+
+                <span class="s3"># Always close the connection. This disables HTTP/1.1</span>
+                <span class="s3"># keep-alive connections. They aren't handled well by</span>
+                <span class="s3"># Python's http.server because it doesn't know how to</span>
+                <span class="s3"># drain the stream before the next request line.</span>
+                <span class="s1">self.send_header(</span><span class="s4">&quot;Connection&quot;</span><span class="s2">, </span><span class="s4">&quot;close&quot;</span><span class="s1">)</span>
+                <span class="s1">self.end_headers()</span>
+
+            <span class="s2">assert </span><span class="s1">isinstance(data</span><span class="s2">, </span><span class="s1">bytes)</span><span class="s2">, </span><span class="s4">&quot;applications must write bytes&quot;</span>
+
+            <span class="s2">if </span><span class="s1">data:</span>
+                <span class="s2">if </span><span class="s1">chunk_response:</span>
+                    <span class="s1">self.wfile.write(hex(len(data))[</span><span class="s5">2</span><span class="s1">:].encode())</span>
+                    <span class="s1">self.wfile.write(</span><span class="s6">b&quot;</span><span class="s2">\r\n</span><span class="s6">&quot;</span><span class="s1">)</span>
+
+                <span class="s1">self.wfile.write(data)</span>
+
+                <span class="s2">if </span><span class="s1">chunk_response:</span>
+                    <span class="s1">self.wfile.write(</span><span class="s6">b&quot;</span><span class="s2">\r\n</span><span class="s6">&quot;</span><span class="s1">)</span>
+
+            <span class="s1">self.wfile.flush()</span>
+
+        <span class="s2">def </span><span class="s1">start_response(status</span><span class="s2">, </span><span class="s1">headers</span><span class="s2">, </span><span class="s1">exc_info=</span><span class="s2">None</span><span class="s1">):  </span><span class="s3"># type: ignore</span>
+            <span class="s2">nonlocal </span><span class="s1">status_set</span><span class="s2">, </span><span class="s1">headers_set</span>
+            <span class="s2">if </span><span class="s1">exc_info:</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s2">if </span><span class="s1">headers_sent:</span>
+                        <span class="s2">raise </span><span class="s1">exc_info[</span><span class="s5">1</span><span class="s1">].with_traceback(exc_info[</span><span class="s5">2</span><span class="s1">])</span>
+                <span class="s2">finally</span><span class="s1">:</span>
+                    <span class="s1">exc_info = </span><span class="s2">None</span>
+            <span class="s2">elif </span><span class="s1">headers_set:</span>
+                <span class="s2">raise </span><span class="s1">AssertionError(</span><span class="s4">&quot;Headers already set&quot;</span><span class="s1">)</span>
+            <span class="s1">status_set = status</span>
+            <span class="s1">headers_set = headers</span>
+            <span class="s2">return </span><span class="s1">write</span>
+
+        <span class="s2">def </span><span class="s1">execute(app: WSGIApplication) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+            <span class="s1">application_iter = app(environ</span><span class="s2">, </span><span class="s1">start_response)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s2">for </span><span class="s1">data </span><span class="s2">in </span><span class="s1">application_iter:</span>
+                    <span class="s1">write(data)</span>
+                <span class="s2">if not </span><span class="s1">headers_sent:</span>
+                    <span class="s1">write(</span><span class="s6">b&quot;&quot;</span><span class="s1">)</span>
+                <span class="s2">if </span><span class="s1">chunk_response:</span>
+                    <span class="s1">self.wfile.write(</span><span class="s6">b&quot;0</span><span class="s2">\r\n\r\n</span><span class="s6">&quot;</span><span class="s1">)</span>
+            <span class="s2">finally</span><span class="s1">:</span>
+                <span class="s3"># Check for any remaining data in the read socket, and discard it. This</span>
+                <span class="s3"># will read past request.max_content_length, but lets the client see a</span>
+                <span class="s3"># 413 response instead of a connection reset failure. If we supported</span>
+                <span class="s3"># keep-alive connections, this naive approach would break by reading the</span>
+                <span class="s3"># next request line. Since we know that write (above) closes every</span>
+                <span class="s3"># connection we can read everything.</span>
+                <span class="s1">selector = selectors.DefaultSelector()</span>
+                <span class="s1">selector.register(self.connection</span><span class="s2">, </span><span class="s1">selectors.EVENT_READ)</span>
+                <span class="s1">total_size = </span><span class="s5">0</span>
+                <span class="s1">total_reads = </span><span class="s5">0</span>
+
+                <span class="s3"># A timeout of 0 tends to fail because a client needs a small amount of</span>
+                <span class="s3"># time to continue sending its data.</span>
+                <span class="s2">while </span><span class="s1">selector.select(timeout=</span><span class="s5">0.01</span><span class="s1">):</span>
+                    <span class="s3"># Only read 10MB into memory at a time.</span>
+                    <span class="s1">data = self.rfile.read(</span><span class="s5">10_000_000</span><span class="s1">)</span>
+                    <span class="s1">total_size += len(data)</span>
+                    <span class="s1">total_reads += </span><span class="s5">1</span>
+
+                    <span class="s3"># Stop reading on no data, &gt;=10GB, or 1000 reads. If a client sends</span>
+                    <span class="s3"># more than that, they'll get a connection reset failure.</span>
+                    <span class="s2">if not </span><span class="s1">data </span><span class="s2">or </span><span class="s1">total_size &gt;= </span><span class="s5">10_000_000_000 </span><span class="s2">or </span><span class="s1">total_reads &gt; </span><span class="s5">1000</span><span class="s1">:</span>
+                        <span class="s2">break</span>
+
+                <span class="s1">selector.close()</span>
+
+                <span class="s2">if </span><span class="s1">hasattr(application_iter</span><span class="s2">, </span><span class="s4">&quot;close&quot;</span><span class="s1">):</span>
+                    <span class="s1">application_iter.close()</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">execute(self.server.app)</span>
+        <span class="s2">except </span><span class="s1">(ConnectionError</span><span class="s2">, </span><span class="s1">socket.timeout) </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.connection_dropped(e</span><span class="s2">, </span><span class="s1">environ)</span>
+        <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">self.server.passthrough_errors:</span>
+                <span class="s2">raise</span>
+
+            <span class="s2">if </span><span class="s1">status_sent </span><span class="s2">is not None and </span><span class="s1">chunk_response:</span>
+                <span class="s1">self.close_connection = </span><span class="s2">True</span>
+
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s3"># if we haven't yet sent the headers but they are set</span>
+                <span class="s3"># we roll back to be able to set them again.</span>
+                <span class="s2">if </span><span class="s1">status_sent </span><span class="s2">is None</span><span class="s1">:</span>
+                    <span class="s1">status_set = </span><span class="s2">None</span>
+                    <span class="s1">headers_set = </span><span class="s2">None</span>
+                <span class="s1">execute(InternalServerError())</span>
+            <span class="s2">except </span><span class="s1">Exception:</span>
+                <span class="s2">pass</span>
+
+            <span class="s2">from </span><span class="s1">.debug.tbtools </span><span class="s2">import </span><span class="s1">DebugTraceback</span>
+
+            <span class="s1">msg = DebugTraceback(e).render_traceback_text()</span>
+            <span class="s1">self.server.log(</span><span class="s4">&quot;error&quot;</span><span class="s2">, </span><span class="s4">f&quot;Error on request:</span><span class="s2">\n{</span><span class="s1">msg</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">handle(self) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s0">&quot;&quot;&quot;Handles a request ignoring dropped connections.&quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">super().handle()</span>
+        <span class="s2">except </span><span class="s1">(ConnectionError</span><span class="s2">, </span><span class="s1">socket.timeout) </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.connection_dropped(e)</span>
+        <span class="s2">except </span><span class="s1">Exception </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">self.server.ssl_context </span><span class="s2">is not None and </span><span class="s1">is_ssl_error(e):</span>
+                <span class="s1">self.log_error(</span><span class="s4">&quot;SSL error occurred: %s&quot;</span><span class="s2">, </span><span class="s1">e)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s2">raise</span>
+
+    <span class="s2">def </span><span class="s1">connection_dropped(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">error: BaseException</span><span class="s2">, </span><span class="s1">environ: WSGIEnvironment | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+    <span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s0">&quot;&quot;&quot;Called if the connection was closed by the client.  By default 
+        nothing happens. 
+        &quot;&quot;&quot;</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__(self</span><span class="s2">, </span><span class="s1">name: str) -&gt; t.Any:</span>
+        <span class="s3"># All HTTP methods are handled by run_wsgi.</span>
+        <span class="s2">if </span><span class="s1">name.startswith(</span><span class="s4">&quot;do_&quot;</span><span class="s1">):</span>
+            <span class="s2">return </span><span class="s1">self.run_wsgi</span>
+
+        <span class="s3"># All other attributes are forwarded to the base class.</span>
+        <span class="s2">return </span><span class="s1">getattr(super()</span><span class="s2">, </span><span class="s1">name)</span>
+
+    <span class="s2">def </span><span class="s1">address_string(self) -&gt; str:</span>
+        <span class="s2">if </span><span class="s1">getattr(self</span><span class="s2">, </span><span class="s4">&quot;environ&quot;</span><span class="s2">, None</span><span class="s1">):</span>
+            <span class="s2">return </span><span class="s1">self.environ[</span><span class="s4">&quot;REMOTE_ADDR&quot;</span><span class="s1">]  </span><span class="s3"># type: ignore</span>
+
+        <span class="s2">if not </span><span class="s1">self.client_address:</span>
+            <span class="s2">return </span><span class="s4">&quot;&lt;local&gt;&quot;</span>
+
+        <span class="s2">return </span><span class="s1">self.client_address[</span><span class="s5">0</span><span class="s1">]</span>
+
+    <span class="s2">def </span><span class="s1">port_integer(self) -&gt; int:</span>
+        <span class="s2">return </span><span class="s1">self.client_address[</span><span class="s5">1</span><span class="s1">]</span>
+
+    <span class="s3"># Escape control characters. This is defined (but private) in Python 3.12.</span>
+    <span class="s1">_control_char_table = str.maketrans(</span>
+        <span class="s1">{c: </span><span class="s4">rf&quot;\x</span><span class="s2">{</span><span class="s1">c</span><span class="s2">:</span><span class="s4">02x</span><span class="s2">}</span><span class="s4">&quot; </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">[*range(</span><span class="s5">0x20</span><span class="s1">)</span><span class="s2">, </span><span class="s1">*range(</span><span class="s5">0x7F</span><span class="s2">, </span><span class="s5">0xA0</span><span class="s1">)]}</span>
+    <span class="s1">)</span>
+    <span class="s1">_control_char_table[ord(</span><span class="s4">&quot;</span><span class="s2">\\</span><span class="s4">&quot;</span><span class="s1">)] = </span><span class="s4">r&quot;\\&quot;</span>
+
+    <span class="s2">def </span><span class="s1">log_request(self</span><span class="s2">, </span><span class="s1">code: int | str = </span><span class="s4">&quot;-&quot;</span><span class="s2">, </span><span class="s1">size: int | str = </span><span class="s4">&quot;-&quot;</span><span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">path = uri_to_iri(self.path)</span>
+            <span class="s1">msg = </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self.command</span><span class="s2">} {</span><span class="s1">path</span><span class="s2">} {</span><span class="s1">self.request_version</span><span class="s2">}</span><span class="s4">&quot;</span>
+        <span class="s2">except </span><span class="s1">AttributeError:</span>
+            <span class="s3"># path isn't set if the requestline was bad</span>
+            <span class="s1">msg = self.requestline</span>
+
+        <span class="s3"># Escape control characters that may be in the decoded path.</span>
+        <span class="s1">msg = msg.translate(self._control_char_table)</span>
+        <span class="s1">code = str(code)</span>
+
+        <span class="s2">if </span><span class="s1">code[</span><span class="s5">0</span><span class="s1">] == </span><span class="s4">&quot;1&quot;</span><span class="s1">:  </span><span class="s3"># 1xx - Informational</span>
+            <span class="s1">msg = _ansi_style(msg</span><span class="s2">, </span><span class="s4">&quot;bold&quot;</span><span class="s1">)</span>
+        <span class="s2">elif </span><span class="s1">code == </span><span class="s4">&quot;200&quot;</span><span class="s1">:  </span><span class="s3"># 2xx - Success</span>
+            <span class="s2">pass</span>
+        <span class="s2">elif </span><span class="s1">code == </span><span class="s4">&quot;304&quot;</span><span class="s1">:  </span><span class="s3"># 304 - Resource Not Modified</span>
+            <span class="s1">msg = _ansi_style(msg</span><span class="s2">, </span><span class="s4">&quot;cyan&quot;</span><span class="s1">)</span>
+        <span class="s2">elif </span><span class="s1">code[</span><span class="s5">0</span><span class="s1">] == </span><span class="s4">&quot;3&quot;</span><span class="s1">:  </span><span class="s3"># 3xx - Redirection</span>
+            <span class="s1">msg = _ansi_style(msg</span><span class="s2">, </span><span class="s4">&quot;green&quot;</span><span class="s1">)</span>
+        <span class="s2">elif </span><span class="s1">code == </span><span class="s4">&quot;404&quot;</span><span class="s1">:  </span><span class="s3"># 404 - Resource Not Found</span>
+            <span class="s1">msg = _ansi_style(msg</span><span class="s2">, </span><span class="s4">&quot;yellow&quot;</span><span class="s1">)</span>
+        <span class="s2">elif </span><span class="s1">code[</span><span class="s5">0</span><span class="s1">] == </span><span class="s4">&quot;4&quot;</span><span class="s1">:  </span><span class="s3"># 4xx - Client Error</span>
+            <span class="s1">msg = _ansi_style(msg</span><span class="s2">, </span><span class="s4">&quot;bold&quot;</span><span class="s2">, </span><span class="s4">&quot;red&quot;</span><span class="s1">)</span>
+        <span class="s2">else</span><span class="s1">:  </span><span class="s3"># 5xx, or any other response</span>
+            <span class="s1">msg = _ansi_style(msg</span><span class="s2">, </span><span class="s4">&quot;bold&quot;</span><span class="s2">, </span><span class="s4">&quot;magenta&quot;</span><span class="s1">)</span>
+
+        <span class="s1">self.log(</span><span class="s4">&quot;info&quot;</span><span class="s2">, </span><span class="s4">'&quot;%s&quot; %s %s'</span><span class="s2">, </span><span class="s1">msg</span><span class="s2">, </span><span class="s1">code</span><span class="s2">, </span><span class="s1">size)</span>
+
+    <span class="s2">def </span><span class="s1">log_error(self</span><span class="s2">, </span><span class="s1">format: str</span><span class="s2">, </span><span class="s1">*args: t.Any) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s1">self.log(</span><span class="s4">&quot;error&quot;</span><span class="s2">, </span><span class="s1">format</span><span class="s2">, </span><span class="s1">*args)</span>
+
+    <span class="s2">def </span><span class="s1">log_message(self</span><span class="s2">, </span><span class="s1">format: str</span><span class="s2">, </span><span class="s1">*args: t.Any) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s1">self.log(</span><span class="s4">&quot;info&quot;</span><span class="s2">, </span><span class="s1">format</span><span class="s2">, </span><span class="s1">*args)</span>
+
+    <span class="s2">def </span><span class="s1">log(self</span><span class="s2">, </span><span class="s1">type: str</span><span class="s2">, </span><span class="s1">message: str</span><span class="s2">, </span><span class="s1">*args: t.Any) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s1">_log(</span>
+            <span class="s1">type</span><span class="s2">,</span>
+            <span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">self.address_string()</span><span class="s2">} </span><span class="s4">- - [</span><span class="s2">{</span><span class="s1">self.log_date_time_string()</span><span class="s2">}</span><span class="s4">] </span><span class="s2">{</span><span class="s1">message</span><span class="s2">}\n</span><span class="s4">&quot;</span><span class="s2">,</span>
+            <span class="s1">*args</span><span class="s2">,</span>
+        <span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">_ansi_style(value: str</span><span class="s2">, </span><span class="s1">*styles: str) -&gt; str:</span>
+    <span class="s2">if not </span><span class="s1">_log_add_style:</span>
+        <span class="s2">return </span><span class="s1">value</span>
+
+    <span class="s1">codes = {</span>
+        <span class="s4">&quot;bold&quot;</span><span class="s1">: </span><span class="s5">1</span><span class="s2">,</span>
+        <span class="s4">&quot;red&quot;</span><span class="s1">: </span><span class="s5">31</span><span class="s2">,</span>
+        <span class="s4">&quot;green&quot;</span><span class="s1">: </span><span class="s5">32</span><span class="s2">,</span>
+        <span class="s4">&quot;yellow&quot;</span><span class="s1">: </span><span class="s5">33</span><span class="s2">,</span>
+        <span class="s4">&quot;magenta&quot;</span><span class="s1">: </span><span class="s5">35</span><span class="s2">,</span>
+        <span class="s4">&quot;cyan&quot;</span><span class="s1">: </span><span class="s5">36</span><span class="s2">,</span>
+    <span class="s1">}</span>
+
+    <span class="s2">for </span><span class="s1">style </span><span class="s2">in </span><span class="s1">styles:</span>
+        <span class="s1">value = </span><span class="s4">f&quot;</span><span class="s2">\x1b</span><span class="s4">[</span><span class="s2">{</span><span class="s1">codes[style]</span><span class="s2">}</span><span class="s4">m</span><span class="s2">{</span><span class="s1">value</span><span class="s2">}</span><span class="s4">&quot;</span>
+
+    <span class="s2">return </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">value</span><span class="s2">}\x1b</span><span class="s4">[0m&quot;</span>
+
+
+<span class="s2">def </span><span class="s1">generate_adhoc_ssl_pair(</span>
+    <span class="s1">cn: str | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+<span class="s1">) -&gt; tuple[Certificate</span><span class="s2">, </span><span class="s1">RSAPrivateKeyWithSerialization]:</span>
+    <span class="s2">try</span><span class="s1">:</span>
+        <span class="s2">from </span><span class="s1">cryptography </span><span class="s2">import </span><span class="s1">x509</span>
+        <span class="s2">from </span><span class="s1">cryptography.x509.oid </span><span class="s2">import </span><span class="s1">NameOID</span>
+        <span class="s2">from </span><span class="s1">cryptography.hazmat.backends </span><span class="s2">import </span><span class="s1">default_backend</span>
+        <span class="s2">from </span><span class="s1">cryptography.hazmat.primitives </span><span class="s2">import </span><span class="s1">hashes</span>
+        <span class="s2">from </span><span class="s1">cryptography.hazmat.primitives.asymmetric </span><span class="s2">import </span><span class="s1">rsa</span>
+    <span class="s2">except </span><span class="s1">ImportError:</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span>
+            <span class="s4">&quot;Using ad-hoc certificates requires the cryptography library.&quot;</span>
+        <span class="s1">) </span><span class="s2">from None</span>
+
+    <span class="s1">backend = default_backend()</span>
+    <span class="s1">pkey = rsa.generate_private_key(</span>
+        <span class="s1">public_exponent=</span><span class="s5">65537</span><span class="s2">, </span><span class="s1">key_size=</span><span class="s5">2048</span><span class="s2">, </span><span class="s1">backend=backend</span>
+    <span class="s1">)</span>
+
+    <span class="s3"># pretty damn sure that this is not actually accepted by anyone</span>
+    <span class="s2">if </span><span class="s1">cn </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s1">cn = </span><span class="s4">&quot;*&quot;</span>
+
+    <span class="s1">subject = x509.Name(</span>
+        <span class="s1">[</span>
+            <span class="s1">x509.NameAttribute(NameOID.ORGANIZATION_NAME</span><span class="s2">, </span><span class="s4">&quot;Dummy Certificate&quot;</span><span class="s1">)</span><span class="s2">,</span>
+            <span class="s1">x509.NameAttribute(NameOID.COMMON_NAME</span><span class="s2">, </span><span class="s1">cn)</span><span class="s2">,</span>
+        <span class="s1">]</span>
+    <span class="s1">)</span>
+
+    <span class="s1">backend = default_backend()</span>
+    <span class="s1">cert = (</span>
+        <span class="s1">x509.CertificateBuilder()</span>
+        <span class="s1">.subject_name(subject)</span>
+        <span class="s1">.issuer_name(subject)</span>
+        <span class="s1">.public_key(pkey.public_key())</span>
+        <span class="s1">.serial_number(x509.random_serial_number())</span>
+        <span class="s1">.not_valid_before(dt.now(timezone.utc))</span>
+        <span class="s1">.not_valid_after(dt.now(timezone.utc) + timedelta(days=</span><span class="s5">365</span><span class="s1">))</span>
+        <span class="s1">.add_extension(x509.ExtendedKeyUsage([x509.OID_SERVER_AUTH])</span><span class="s2">, </span><span class="s1">critical=</span><span class="s2">False</span><span class="s1">)</span>
+        <span class="s1">.add_extension(x509.SubjectAlternativeName([x509.DNSName(cn)])</span><span class="s2">, </span><span class="s1">critical=</span><span class="s2">False</span><span class="s1">)</span>
+        <span class="s1">.sign(pkey</span><span class="s2">, </span><span class="s1">hashes.SHA256()</span><span class="s2">, </span><span class="s1">backend)</span>
+    <span class="s1">)</span>
+    <span class="s2">return </span><span class="s1">cert</span><span class="s2">, </span><span class="s1">pkey</span>
+
+
+<span class="s2">def </span><span class="s1">make_ssl_devcert(</span>
+    <span class="s1">base_path: str</span><span class="s2">, </span><span class="s1">host: str | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None, </span><span class="s1">cn: str | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+<span class="s1">) -&gt; tuple[str</span><span class="s2">, </span><span class="s1">str]:</span>
+    <span class="s0">&quot;&quot;&quot;Creates an SSL key for development.  This should be used instead of 
+    the ``'adhoc'`` key which generates a new cert on each server start. 
+    It accepts a path for where it should store the key and cert and 
+    either a host or CN.  If a host is given it will use the CN 
+    ``*.host/CN=host``. 
+ 
+    For more information see :func:`run_simple`. 
+ 
+    .. versionadded:: 0.9 
+ 
+    :param base_path: the path to the certificate and key.  The extension 
+                      ``.crt`` is added for the certificate, ``.key`` is 
+                      added for the key. 
+    :param host: the name of the host.  This can be used as an alternative 
+                 for the `cn`. 
+    :param cn: the `CN` to use. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s2">if </span><span class="s1">host </span><span class="s2">is not None</span><span class="s1">:</span>
+        <span class="s1">cn = </span><span class="s4">f&quot;*.</span><span class="s2">{</span><span class="s1">host</span><span class="s2">}</span><span class="s4">/CN=</span><span class="s2">{</span><span class="s1">host</span><span class="s2">}</span><span class="s4">&quot;</span>
+    <span class="s1">cert</span><span class="s2">, </span><span class="s1">pkey = generate_adhoc_ssl_pair(cn=cn)</span>
+
+    <span class="s2">from </span><span class="s1">cryptography.hazmat.primitives </span><span class="s2">import </span><span class="s1">serialization</span>
+
+    <span class="s1">cert_file = </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">base_path</span><span class="s2">}</span><span class="s4">.crt&quot;</span>
+    <span class="s1">pkey_file = </span><span class="s4">f&quot;</span><span class="s2">{</span><span class="s1">base_path</span><span class="s2">}</span><span class="s4">.key&quot;</span>
+
+    <span class="s2">with </span><span class="s1">open(cert_file</span><span class="s2">, </span><span class="s4">&quot;wb&quot;</span><span class="s1">) </span><span class="s2">as </span><span class="s1">f:</span>
+        <span class="s1">f.write(cert.public_bytes(serialization.Encoding.PEM))</span>
+    <span class="s2">with </span><span class="s1">open(pkey_file</span><span class="s2">, </span><span class="s4">&quot;wb&quot;</span><span class="s1">) </span><span class="s2">as </span><span class="s1">f:</span>
+        <span class="s1">f.write(</span>
+            <span class="s1">pkey.private_bytes(</span>
+                <span class="s1">encoding=serialization.Encoding.PEM</span><span class="s2">,</span>
+                <span class="s1">format=serialization.PrivateFormat.TraditionalOpenSSL</span><span class="s2">,</span>
+                <span class="s1">encryption_algorithm=serialization.NoEncryption()</span><span class="s2">,</span>
+            <span class="s1">)</span>
+        <span class="s1">)</span>
+
+    <span class="s2">return </span><span class="s1">cert_file</span><span class="s2">, </span><span class="s1">pkey_file</span>
+
+
+<span class="s2">def </span><span class="s1">generate_adhoc_ssl_context() -&gt; ssl.SSLContext:</span>
+    <span class="s0">&quot;&quot;&quot;Generates an adhoc SSL context for the development server.&quot;&quot;&quot;</span>
+    <span class="s2">import </span><span class="s1">tempfile</span>
+    <span class="s2">import </span><span class="s1">atexit</span>
+
+    <span class="s1">cert</span><span class="s2">, </span><span class="s1">pkey = generate_adhoc_ssl_pair()</span>
+
+    <span class="s2">from </span><span class="s1">cryptography.hazmat.primitives </span><span class="s2">import </span><span class="s1">serialization</span>
+
+    <span class="s1">cert_handle</span><span class="s2">, </span><span class="s1">cert_file = tempfile.mkstemp()</span>
+    <span class="s1">pkey_handle</span><span class="s2">, </span><span class="s1">pkey_file = tempfile.mkstemp()</span>
+    <span class="s1">atexit.register(os.remove</span><span class="s2">, </span><span class="s1">pkey_file)</span>
+    <span class="s1">atexit.register(os.remove</span><span class="s2">, </span><span class="s1">cert_file)</span>
+
+    <span class="s1">os.write(cert_handle</span><span class="s2">, </span><span class="s1">cert.public_bytes(serialization.Encoding.PEM))</span>
+    <span class="s1">os.write(</span>
+        <span class="s1">pkey_handle</span><span class="s2">,</span>
+        <span class="s1">pkey.private_bytes(</span>
+            <span class="s1">encoding=serialization.Encoding.PEM</span><span class="s2">,</span>
+            <span class="s1">format=serialization.PrivateFormat.TraditionalOpenSSL</span><span class="s2">,</span>
+            <span class="s1">encryption_algorithm=serialization.NoEncryption()</span><span class="s2">,</span>
+        <span class="s1">)</span><span class="s2">,</span>
+    <span class="s1">)</span>
+
+    <span class="s1">os.close(cert_handle)</span>
+    <span class="s1">os.close(pkey_handle)</span>
+    <span class="s1">ctx = load_ssl_context(cert_file</span><span class="s2">, </span><span class="s1">pkey_file)</span>
+    <span class="s2">return </span><span class="s1">ctx</span>
+
+
+<span class="s2">def </span><span class="s1">load_ssl_context(</span>
+    <span class="s1">cert_file: str</span><span class="s2">, </span><span class="s1">pkey_file: str | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None, </span><span class="s1">protocol: int | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span>
+<span class="s1">) -&gt; ssl.SSLContext:</span>
+    <span class="s0">&quot;&quot;&quot;Loads SSL context from cert/private key files and optional protocol. 
+    Many parameters are directly taken from the API of 
+    :py:class:`ssl.SSLContext`. 
+ 
+    :param cert_file: Path of the certificate to use. 
+    :param pkey_file: Path of the private key to use. If not given, the key 
+                      will be obtained from the certificate file. 
+    :param protocol: A ``PROTOCOL`` constant from the :mod:`ssl` module. 
+        Defaults to :data:`ssl.PROTOCOL_TLS_SERVER`. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">protocol </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s1">protocol = ssl.PROTOCOL_TLS_SERVER</span>
+
+    <span class="s1">ctx = ssl.SSLContext(protocol)</span>
+    <span class="s1">ctx.load_cert_chain(cert_file</span><span class="s2">, </span><span class="s1">pkey_file)</span>
+    <span class="s2">return </span><span class="s1">ctx</span>
+
+
+<span class="s2">def </span><span class="s1">is_ssl_error(error: Exception | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None</span><span class="s1">) -&gt; bool:</span>
+    <span class="s0">&quot;&quot;&quot;Checks if the given error (or the current one) is an SSL error.&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">error </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s1">error = t.cast(Exception</span><span class="s2">, </span><span class="s1">sys.exc_info()[</span><span class="s5">1</span><span class="s1">])</span>
+    <span class="s2">return </span><span class="s1">isinstance(error</span><span class="s2">, </span><span class="s1">ssl.SSLError)</span>
+
+
+<span class="s2">def </span><span class="s1">select_address_family(host: str</span><span class="s2">, </span><span class="s1">port: int) -&gt; socket.AddressFamily:</span>
+    <span class="s0">&quot;&quot;&quot;Return ``AF_INET4``, ``AF_INET6``, or ``AF_UNIX`` depending on 
+    the host and port.&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">host.startswith(</span><span class="s4">&quot;unix://&quot;</span><span class="s1">):</span>
+        <span class="s2">return </span><span class="s1">socket.AF_UNIX</span>
+    <span class="s2">elif </span><span class="s4">&quot;:&quot; </span><span class="s2">in </span><span class="s1">host </span><span class="s2">and </span><span class="s1">hasattr(socket</span><span class="s2">, </span><span class="s4">&quot;AF_INET6&quot;</span><span class="s1">):</span>
+        <span class="s2">return </span><span class="s1">socket.AF_INET6</span>
+    <span class="s2">return </span><span class="s1">socket.AF_INET</span>
+
+
+<span class="s2">def </span><span class="s1">get_sockaddr(</span>
+    <span class="s1">host: str</span><span class="s2">, </span><span class="s1">port: int</span><span class="s2">, </span><span class="s1">family: socket.AddressFamily</span>
+<span class="s1">) -&gt; tuple[str</span><span class="s2">, </span><span class="s1">int] | str:</span>
+    <span class="s0">&quot;&quot;&quot;Return a fully qualified socket address that can be passed to 
+    :func:`socket.bind`.&quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">family == af_unix:</span>
+        <span class="s3"># Absolute path avoids IDNA encoding error when path starts with dot.</span>
+        <span class="s2">return </span><span class="s1">os.path.abspath(host.partition(</span><span class="s4">&quot;://&quot;</span><span class="s1">)[</span><span class="s5">2</span><span class="s1">])</span>
+    <span class="s2">try</span><span class="s1">:</span>
+        <span class="s1">res = socket.getaddrinfo(</span>
+            <span class="s1">host</span><span class="s2">, </span><span class="s1">port</span><span class="s2">, </span><span class="s1">family</span><span class="s2">, </span><span class="s1">socket.SOCK_STREAM</span><span class="s2">, </span><span class="s1">socket.IPPROTO_TCP</span>
+        <span class="s1">)</span>
+    <span class="s2">except </span><span class="s1">socket.gaierror:</span>
+        <span class="s2">return </span><span class="s1">host</span><span class="s2">, </span><span class="s1">port</span>
+    <span class="s2">return </span><span class="s1">res[</span><span class="s5">0</span><span class="s1">][</span><span class="s5">4</span><span class="s1">]  </span><span class="s3"># type: ignore</span>
+
+
+<span class="s2">def </span><span class="s1">get_interface_ip(family: socket.AddressFamily) -&gt; str:</span>
+    <span class="s0">&quot;&quot;&quot;Get the IP address of an external interface. Used when binding to 
+    0.0.0.0 or ::1 to show a more useful URL. 
+ 
+    :meta private: 
+    &quot;&quot;&quot;</span>
+    <span class="s3"># arbitrary private address</span>
+    <span class="s1">host = </span><span class="s4">&quot;fd31:f903:5ab5:1::1&quot; </span><span class="s2">if </span><span class="s1">family == socket.AF_INET6 </span><span class="s2">else </span><span class="s4">&quot;10.253.155.219&quot;</span>
+
+    <span class="s2">with </span><span class="s1">socket.socket(family</span><span class="s2">, </span><span class="s1">socket.SOCK_DGRAM) </span><span class="s2">as </span><span class="s1">s:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">s.connect((host</span><span class="s2">, </span><span class="s5">58162</span><span class="s1">))</span>
+        <span class="s2">except </span><span class="s1">OSError:</span>
+            <span class="s2">return </span><span class="s4">&quot;::1&quot; </span><span class="s2">if </span><span class="s1">family == socket.AF_INET6 </span><span class="s2">else </span><span class="s4">&quot;127.0.0.1&quot;</span>
+
+        <span class="s2">return </span><span class="s1">s.getsockname()[</span><span class="s5">0</span><span class="s1">]  </span><span class="s3"># type: ignore</span>
+
+
+<span class="s2">class </span><span class="s1">BaseWSGIServer(HTTPServer):</span>
+    <span class="s0">&quot;&quot;&quot;A WSGI server that that handles one request at a time. 
+ 
+    Use :func:`make_server` to create a server instance. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">multithread = </span><span class="s2">False</span>
+    <span class="s1">multiprocess = </span><span class="s2">False</span>
+    <span class="s1">request_queue_size = LISTEN_QUEUE</span>
+    <span class="s1">allow_reuse_address = </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">host: str</span><span class="s2">,</span>
+        <span class="s1">port: int</span><span class="s2">,</span>
+        <span class="s1">app: WSGIApplication</span><span class="s2">,</span>
+        <span class="s1">handler: type[WSGIRequestHandler] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+        <span class="s1">passthrough_errors: bool = </span><span class="s2">False,</span>
+        <span class="s1">ssl_context: _TSSLContextArg | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+        <span class="s1">fd: int | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">if </span><span class="s1">handler </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">handler = WSGIRequestHandler</span>
+
+        <span class="s3"># If the handler doesn't directly set a protocol version and</span>
+        <span class="s3"># thread or process workers are used, then allow chunked</span>
+        <span class="s3"># responses and keep-alive connections by enabling HTTP/1.1.</span>
+        <span class="s2">if </span><span class="s4">&quot;protocol_version&quot; </span><span class="s2">not in </span><span class="s1">vars(handler) </span><span class="s2">and </span><span class="s1">(</span>
+            <span class="s1">self.multithread </span><span class="s2">or </span><span class="s1">self.multiprocess</span>
+        <span class="s1">):</span>
+            <span class="s1">handler.protocol_version = </span><span class="s4">&quot;HTTP/1.1&quot;</span>
+
+        <span class="s1">self.host = host</span>
+        <span class="s1">self.port = port</span>
+        <span class="s1">self.app = app</span>
+        <span class="s1">self.passthrough_errors = passthrough_errors</span>
+
+        <span class="s1">self.address_family = address_family = select_address_family(host</span><span class="s2">, </span><span class="s1">port)</span>
+        <span class="s1">server_address = get_sockaddr(host</span><span class="s2">, </span><span class="s1">int(port)</span><span class="s2">, </span><span class="s1">address_family)</span>
+
+        <span class="s3"># Remove a leftover Unix socket file from a previous run. Don't</span>
+        <span class="s3"># remove a file that was set up by run_simple.</span>
+        <span class="s2">if </span><span class="s1">address_family == af_unix </span><span class="s2">and </span><span class="s1">fd </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">server_address = t.cast(str</span><span class="s2">, </span><span class="s1">server_address)</span>
+
+            <span class="s2">if </span><span class="s1">os.path.exists(server_address):</span>
+                <span class="s1">os.unlink(server_address)</span>
+
+        <span class="s3"># Bind and activate will be handled manually, it should only</span>
+        <span class="s3"># happen if we're not using a socket that was already set up.</span>
+        <span class="s1">super().__init__(</span>
+            <span class="s1">server_address</span><span class="s2">,  </span><span class="s3"># type: ignore[arg-type]</span>
+            <span class="s1">handler</span><span class="s2">,</span>
+            <span class="s1">bind_and_activate=</span><span class="s2">False,</span>
+        <span class="s1">)</span>
+
+        <span class="s2">if </span><span class="s1">fd </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s3"># No existing socket descriptor, do bind_and_activate=True.</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">self.server_bind()</span>
+                <span class="s1">self.server_activate()</span>
+            <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">e:</span>
+                <span class="s3"># Catch connection issues and show them without the traceback. Show</span>
+                <span class="s3"># extra instructions for address not found, and for macOS.</span>
+                <span class="s1">self.server_close()</span>
+                <span class="s1">print(e.strerror</span><span class="s2">, </span><span class="s1">file=sys.stderr)</span>
+
+                <span class="s2">if </span><span class="s1">e.errno == errno.EADDRINUSE:</span>
+                    <span class="s1">print(</span>
+                        <span class="s4">f&quot;Port </span><span class="s2">{</span><span class="s1">port</span><span class="s2">} </span><span class="s4">is in use by another program. Either identify and&quot;</span>
+                        <span class="s4">&quot; stop that program, or start the server with a different&quot;</span>
+                        <span class="s4">&quot; port.&quot;</span><span class="s2">,</span>
+                        <span class="s1">file=sys.stderr</span><span class="s2">,</span>
+                    <span class="s1">)</span>
+
+                    <span class="s2">if </span><span class="s1">sys.platform == </span><span class="s4">&quot;darwin&quot; </span><span class="s2">and </span><span class="s1">port == </span><span class="s5">5000</span><span class="s1">:</span>
+                        <span class="s1">print(</span>
+                            <span class="s4">&quot;On macOS, try disabling the 'AirPlay Receiver' service&quot;</span>
+                            <span class="s4">&quot; from System Preferences -&gt; General -&gt; AirDrop &amp; Handoff.&quot;</span><span class="s2">,</span>
+                            <span class="s1">file=sys.stderr</span><span class="s2">,</span>
+                        <span class="s1">)</span>
+
+                <span class="s1">sys.exit(</span><span class="s5">1</span><span class="s1">)</span>
+            <span class="s2">except </span><span class="s1">BaseException:</span>
+                <span class="s1">self.server_close()</span>
+                <span class="s2">raise</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s3"># TCPServer automatically opens a socket even if bind_and_activate is False.</span>
+            <span class="s3"># Close it to silence a ResourceWarning.</span>
+            <span class="s1">self.server_close()</span>
+
+            <span class="s3"># Use the passed in socket directly.</span>
+            <span class="s1">self.socket = socket.fromfd(fd</span><span class="s2">, </span><span class="s1">address_family</span><span class="s2">, </span><span class="s1">socket.SOCK_STREAM)</span>
+            <span class="s1">self.server_address = self.socket.getsockname()</span>
+
+        <span class="s2">if </span><span class="s1">address_family != af_unix:</span>
+            <span class="s3"># If port was 0, this will record the bound port.</span>
+            <span class="s1">self.port = self.server_address[</span><span class="s5">1</span><span class="s1">]</span>
+
+        <span class="s2">if </span><span class="s1">ssl_context </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s2">if </span><span class="s1">isinstance(ssl_context</span><span class="s2">, </span><span class="s1">tuple):</span>
+                <span class="s1">ssl_context = load_ssl_context(*ssl_context)</span>
+            <span class="s2">elif </span><span class="s1">ssl_context == </span><span class="s4">&quot;adhoc&quot;</span><span class="s1">:</span>
+                <span class="s1">ssl_context = generate_adhoc_ssl_context()</span>
+
+            <span class="s1">self.socket = ssl_context.wrap_socket(self.socket</span><span class="s2">, </span><span class="s1">server_side=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s1">self.ssl_context: ssl.SSLContext | </span><span class="s2">None </span><span class="s1">= ssl_context</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">self.ssl_context = </span><span class="s2">None</span>
+
+        <span class="s2">import </span><span class="s1">importlib.metadata</span>
+
+        <span class="s1">self._server_version = </span><span class="s4">f&quot;Werkzeug/</span><span class="s2">{</span><span class="s1">importlib.metadata.version(</span><span class="s4">'werkzeug'</span><span class="s1">)</span><span class="s2">}</span><span class="s4">&quot;</span>
+
+    <span class="s2">def </span><span class="s1">log(self</span><span class="s2">, </span><span class="s1">type: str</span><span class="s2">, </span><span class="s1">message: str</span><span class="s2">, </span><span class="s1">*args: t.Any) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s1">_log(type</span><span class="s2">, </span><span class="s1">message</span><span class="s2">, </span><span class="s1">*args)</span>
+
+    <span class="s2">def </span><span class="s1">serve_forever(self</span><span class="s2">, </span><span class="s1">poll_interval: float = </span><span class="s5">0.5</span><span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">super().serve_forever(poll_interval=poll_interval)</span>
+        <span class="s2">except </span><span class="s1">KeyboardInterrupt:</span>
+            <span class="s2">pass</span>
+        <span class="s2">finally</span><span class="s1">:</span>
+            <span class="s1">self.server_close()</span>
+
+    <span class="s2">def </span><span class="s1">handle_error(</span>
+        <span class="s1">self</span><span class="s2">, </span><span class="s1">request: t.Any</span><span class="s2">, </span><span class="s1">client_address: tuple[str</span><span class="s2">, </span><span class="s1">int] | str</span>
+    <span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">if </span><span class="s1">self.passthrough_errors:</span>
+            <span class="s2">raise</span>
+
+        <span class="s2">return </span><span class="s1">super().handle_error(request</span><span class="s2">, </span><span class="s1">client_address)</span>
+
+    <span class="s2">def </span><span class="s1">log_startup(self) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s0">&quot;&quot;&quot;Show information about the address when starting the server.&quot;&quot;&quot;</span>
+        <span class="s1">dev_warning = (</span>
+            <span class="s4">&quot;WARNING: This is a development server. Do not use it in a production&quot;</span>
+            <span class="s4">&quot; deployment. Use a production WSGI server instead.&quot;</span>
+        <span class="s1">)</span>
+        <span class="s1">dev_warning = _ansi_style(dev_warning</span><span class="s2">, </span><span class="s4">&quot;bold&quot;</span><span class="s2">, </span><span class="s4">&quot;red&quot;</span><span class="s1">)</span>
+        <span class="s1">messages = [dev_warning]</span>
+
+        <span class="s2">if </span><span class="s1">self.address_family == af_unix:</span>
+            <span class="s1">messages.append(</span><span class="s4">f&quot; * Running on </span><span class="s2">{</span><span class="s1">self.host</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">scheme = </span><span class="s4">&quot;http&quot; </span><span class="s2">if </span><span class="s1">self.ssl_context </span><span class="s2">is None else </span><span class="s4">&quot;https&quot;</span>
+            <span class="s1">display_hostname = self.host</span>
+
+            <span class="s2">if </span><span class="s1">self.host </span><span class="s2">in </span><span class="s1">{</span><span class="s4">&quot;0.0.0.0&quot;</span><span class="s2">, </span><span class="s4">&quot;::&quot;</span><span class="s1">}:</span>
+                <span class="s1">messages.append(</span><span class="s4">f&quot; * Running on all addresses (</span><span class="s2">{</span><span class="s1">self.host</span><span class="s2">}</span><span class="s4">)&quot;</span><span class="s1">)</span>
+
+                <span class="s2">if </span><span class="s1">self.host == </span><span class="s4">&quot;0.0.0.0&quot;</span><span class="s1">:</span>
+                    <span class="s1">localhost = </span><span class="s4">&quot;127.0.0.1&quot;</span>
+                    <span class="s1">display_hostname = get_interface_ip(socket.AF_INET)</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s1">localhost = </span><span class="s4">&quot;[::1]&quot;</span>
+                    <span class="s1">display_hostname = get_interface_ip(socket.AF_INET6)</span>
+
+                <span class="s1">messages.append(</span><span class="s4">f&quot; * Running on </span><span class="s2">{</span><span class="s1">scheme</span><span class="s2">}</span><span class="s4">://</span><span class="s2">{</span><span class="s1">localhost</span><span class="s2">}</span><span class="s4">:</span><span class="s2">{</span><span class="s1">self.port</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+            <span class="s2">if </span><span class="s4">&quot;:&quot; </span><span class="s2">in </span><span class="s1">display_hostname:</span>
+                <span class="s1">display_hostname = </span><span class="s4">f&quot;[</span><span class="s2">{</span><span class="s1">display_hostname</span><span class="s2">}</span><span class="s4">]&quot;</span>
+
+            <span class="s1">messages.append(</span><span class="s4">f&quot; * Running on </span><span class="s2">{</span><span class="s1">scheme</span><span class="s2">}</span><span class="s4">://</span><span class="s2">{</span><span class="s1">display_hostname</span><span class="s2">}</span><span class="s4">:</span><span class="s2">{</span><span class="s1">self.port</span><span class="s2">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+
+        <span class="s1">_log(</span><span class="s4">&quot;info&quot;</span><span class="s2">, </span><span class="s4">&quot;</span><span class="s2">\n</span><span class="s4">&quot;</span><span class="s1">.join(messages))</span>
+
+
+<span class="s2">class </span><span class="s1">ThreadedWSGIServer(socketserver.ThreadingMixIn</span><span class="s2">, </span><span class="s1">BaseWSGIServer):</span>
+    <span class="s0">&quot;&quot;&quot;A WSGI server that handles concurrent requests in separate 
+    threads. 
+ 
+    Use :func:`make_server` to create a server instance. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">multithread = </span><span class="s2">True</span>
+    <span class="s1">daemon_threads = </span><span class="s2">True</span>
+
+
+<span class="s2">class </span><span class="s1">ForkingWSGIServer(ForkingMixIn</span><span class="s2">, </span><span class="s1">BaseWSGIServer):</span>
+    <span class="s0">&quot;&quot;&quot;A WSGI server that handles concurrent requests in separate forked 
+    processes. 
+ 
+    Use :func:`make_server` to create a server instance. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">multiprocess = </span><span class="s2">True</span>
+
+    <span class="s2">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s2">,</span>
+        <span class="s1">host: str</span><span class="s2">,</span>
+        <span class="s1">port: int</span><span class="s2">,</span>
+        <span class="s1">app: WSGIApplication</span><span class="s2">,</span>
+        <span class="s1">processes: int = </span><span class="s5">40</span><span class="s2">,</span>
+        <span class="s1">handler: type[WSGIRequestHandler] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+        <span class="s1">passthrough_errors: bool = </span><span class="s2">False,</span>
+        <span class="s1">ssl_context: _TSSLContextArg | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+        <span class="s1">fd: int | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+        <span class="s2">if not </span><span class="s1">can_fork:</span>
+            <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">&quot;Your platform does not support forking.&quot;</span><span class="s1">)</span>
+
+        <span class="s1">super().__init__(host</span><span class="s2">, </span><span class="s1">port</span><span class="s2">, </span><span class="s1">app</span><span class="s2">, </span><span class="s1">handler</span><span class="s2">, </span><span class="s1">passthrough_errors</span><span class="s2">, </span><span class="s1">ssl_context</span><span class="s2">, </span><span class="s1">fd)</span>
+        <span class="s1">self.max_children = processes</span>
+
+
+<span class="s2">def </span><span class="s1">make_server(</span>
+    <span class="s1">host: str</span><span class="s2">,</span>
+    <span class="s1">port: int</span><span class="s2">,</span>
+    <span class="s1">app: WSGIApplication</span><span class="s2">,</span>
+    <span class="s1">threaded: bool = </span><span class="s2">False,</span>
+    <span class="s1">processes: int = </span><span class="s5">1</span><span class="s2">,</span>
+    <span class="s1">request_handler: type[WSGIRequestHandler] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">passthrough_errors: bool = </span><span class="s2">False,</span>
+    <span class="s1">ssl_context: _TSSLContextArg | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">fd: int | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+<span class="s1">) -&gt; BaseWSGIServer:</span>
+    <span class="s0">&quot;&quot;&quot;Create an appropriate WSGI server instance based on the value of 
+    ``threaded`` and ``processes``. 
+ 
+    This is called from :func:`run_simple`, but can be used separately 
+    to have access to the server object, such as to run it in a separate 
+    thread. 
+ 
+    See :func:`run_simple` for parameter docs. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if </span><span class="s1">threaded </span><span class="s2">and </span><span class="s1">processes &gt; </span><span class="s5">1</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s4">&quot;Cannot have a multi-thread and multi-process server.&quot;</span><span class="s1">)</span>
+
+    <span class="s2">if </span><span class="s1">threaded:</span>
+        <span class="s2">return </span><span class="s1">ThreadedWSGIServer(</span>
+            <span class="s1">host</span><span class="s2">, </span><span class="s1">port</span><span class="s2">, </span><span class="s1">app</span><span class="s2">, </span><span class="s1">request_handler</span><span class="s2">, </span><span class="s1">passthrough_errors</span><span class="s2">, </span><span class="s1">ssl_context</span><span class="s2">, </span><span class="s1">fd=fd</span>
+        <span class="s1">)</span>
+
+    <span class="s2">if </span><span class="s1">processes &gt; </span><span class="s5">1</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">ForkingWSGIServer(</span>
+            <span class="s1">host</span><span class="s2">,</span>
+            <span class="s1">port</span><span class="s2">,</span>
+            <span class="s1">app</span><span class="s2">,</span>
+            <span class="s1">processes</span><span class="s2">,</span>
+            <span class="s1">request_handler</span><span class="s2">,</span>
+            <span class="s1">passthrough_errors</span><span class="s2">,</span>
+            <span class="s1">ssl_context</span><span class="s2">,</span>
+            <span class="s1">fd=fd</span><span class="s2">,</span>
+        <span class="s1">)</span>
+
+    <span class="s2">return </span><span class="s1">BaseWSGIServer(</span>
+        <span class="s1">host</span><span class="s2">, </span><span class="s1">port</span><span class="s2">, </span><span class="s1">app</span><span class="s2">, </span><span class="s1">request_handler</span><span class="s2">, </span><span class="s1">passthrough_errors</span><span class="s2">, </span><span class="s1">ssl_context</span><span class="s2">, </span><span class="s1">fd=fd</span>
+    <span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">is_running_from_reloader() -&gt; bool:</span>
+    <span class="s0">&quot;&quot;&quot;Check if the server is running as a subprocess within the 
+    Werkzeug reloader. 
+ 
+    .. versionadded:: 0.10 
+    &quot;&quot;&quot;</span>
+    <span class="s2">return </span><span class="s1">os.environ.get(</span><span class="s4">&quot;WERKZEUG_RUN_MAIN&quot;</span><span class="s1">) == </span><span class="s4">&quot;true&quot;</span>
+
+
+<span class="s2">def </span><span class="s1">run_simple(</span>
+    <span class="s1">hostname: str</span><span class="s2">,</span>
+    <span class="s1">port: int</span><span class="s2">,</span>
+    <span class="s1">application: WSGIApplication</span><span class="s2">,</span>
+    <span class="s1">use_reloader: bool = </span><span class="s2">False,</span>
+    <span class="s1">use_debugger: bool = </span><span class="s2">False,</span>
+    <span class="s1">use_evalex: bool = </span><span class="s2">True,</span>
+    <span class="s1">extra_files: t.Iterable[str] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">exclude_patterns: t.Iterable[str] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">reloader_interval: int = </span><span class="s5">1</span><span class="s2">,</span>
+    <span class="s1">reloader_type: str = </span><span class="s4">&quot;auto&quot;</span><span class="s2">,</span>
+    <span class="s1">threaded: bool = </span><span class="s2">False,</span>
+    <span class="s1">processes: int = </span><span class="s5">1</span><span class="s2">,</span>
+    <span class="s1">request_handler: type[WSGIRequestHandler] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">static_files: dict[str</span><span class="s2">, </span><span class="s1">str | tuple[str</span><span class="s2">, </span><span class="s1">str]] | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+    <span class="s1">passthrough_errors: bool = </span><span class="s2">False,</span>
+    <span class="s1">ssl_context: _TSSLContextArg | </span><span class="s2">None </span><span class="s1">= </span><span class="s2">None,</span>
+<span class="s1">) -&gt; </span><span class="s2">None</span><span class="s1">:</span>
+    <span class="s0">&quot;&quot;&quot;Start a development server for a WSGI application. Various 
+    optional features can be enabled. 
+ 
+    .. warning:: 
+ 
+        Do not use the development server when deploying to production. 
+        It is intended for use only during local development. It is not 
+        designed to be particularly efficient, stable, or secure. 
+ 
+    :param hostname: The host to bind to, for example ``'localhost'``. 
+        Can be a domain, IPv4 or IPv6 address, or file path starting 
+        with ``unix://`` for a Unix socket. 
+    :param port: The port to bind to, for example ``8080``. Using ``0`` 
+        tells the OS to pick a random free port. 
+    :param application: The WSGI application to run. 
+    :param use_reloader: Use a reloader process to restart the server 
+        process when files are changed. 
+    :param use_debugger: Use Werkzeug's debugger, which will show 
+        formatted tracebacks on unhandled exceptions. 
+    :param use_evalex: Make the debugger interactive. A Python terminal 
+        can be opened for any frame in the traceback. Some protection is 
+        provided by requiring a PIN, but this should never be enabled 
+        on a publicly visible server. 
+    :param extra_files: The reloader will watch these files for changes 
+        in addition to Python modules. For example, watch a 
+        configuration file. 
+    :param exclude_patterns: The reloader will ignore changes to any 
+        files matching these :mod:`fnmatch` patterns. For example, 
+        ignore cache files. 
+    :param reloader_interval: How often the reloader tries to check for 
+        changes. 
+    :param reloader_type: The reloader to use. The ``'stat'`` reloader 
+        is built in, but may require significant CPU to watch files. The 
+        ``'watchdog'`` reloader is much more efficient but requires 
+        installing the ``watchdog`` package first. 
+    :param threaded: Handle concurrent requests using threads. Cannot be 
+        used with ``processes``. 
+    :param processes: Handle concurrent requests using up to this number 
+        of processes. Cannot be used with ``threaded``. 
+    :param request_handler: Use a different 
+        :class:`~BaseHTTPServer.BaseHTTPRequestHandler` subclass to 
+        handle requests. 
+    :param static_files: A dict mapping URL prefixes to directories to 
+        serve static files from using 
+        :class:`~werkzeug.middleware.SharedDataMiddleware`. 
+    :param passthrough_errors: Don't catch unhandled exceptions at the 
+        server level, let the server crash instead. If ``use_debugger`` 
+        is enabled, the debugger will still catch such errors. 
+    :param ssl_context: Configure TLS to serve over HTTPS. Can be an 
+        :class:`ssl.SSLContext` object, a ``(cert_file, key_file)`` 
+        tuple to create a typical context, or the string ``'adhoc'`` to 
+        generate a temporary self-signed certificate. 
+ 
+    .. versionchanged:: 2.1 
+        Instructions are shown for dealing with an &quot;address already in 
+        use&quot; error. 
+ 
+    .. versionchanged:: 2.1 
+        Running on ``0.0.0.0`` or ``::`` shows the loopback IP in 
+        addition to a real IP. 
+ 
+    .. versionchanged:: 2.1 
+        The command-line interface was removed. 
+ 
+    .. versionchanged:: 2.0 
+        Running on ``0.0.0.0`` or ``::`` shows a real IP address that 
+        was bound as well as a warning not to run the development server 
+        in production. 
+ 
+    .. versionchanged:: 2.0 
+        The ``exclude_patterns`` parameter was added. 
+ 
+    .. versionchanged:: 0.15 
+        Bind to a Unix socket by passing a ``hostname`` that starts with 
+        ``unix://``. 
+ 
+    .. versionchanged:: 0.10 
+        Improved the reloader and added support for changing the backend 
+        through the ``reloader_type`` parameter. 
+ 
+    .. versionchanged:: 0.9 
+        A command-line interface was added. 
+ 
+    .. versionchanged:: 0.8 
+        ``ssl_context`` can be a tuple of paths to the certificate and 
+        private key files. 
+ 
+    .. versionchanged:: 0.6 
+        The ``ssl_context`` parameter was added. 
+ 
+    .. versionchanged:: 0.5 
+       The ``static_files`` and ``passthrough_errors`` parameters were 
+       added. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">if not </span><span class="s1">isinstance(port</span><span class="s2">, </span><span class="s1">int):</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s4">&quot;port must be an integer&quot;</span><span class="s1">)</span>
+
+    <span class="s2">if </span><span class="s1">static_files:</span>
+        <span class="s2">from </span><span class="s1">.middleware.shared_data </span><span class="s2">import </span><span class="s1">SharedDataMiddleware</span>
+
+        <span class="s1">application = SharedDataMiddleware(application</span><span class="s2">, </span><span class="s1">static_files)</span>
+
+    <span class="s2">if </span><span class="s1">use_debugger:</span>
+        <span class="s2">from </span><span class="s1">.debug </span><span class="s2">import </span><span class="s1">DebuggedApplication</span>
+
+        <span class="s1">application = DebuggedApplication(application</span><span class="s2">, </span><span class="s1">evalex=use_evalex)</span>
+
+    <span class="s2">if not </span><span class="s1">is_running_from_reloader():</span>
+        <span class="s1">fd = </span><span class="s2">None</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">fd = int(os.environ[</span><span class="s4">&quot;WERKZEUG_SERVER_FD&quot;</span><span class="s1">])</span>
+
+    <span class="s1">srv = make_server(</span>
+        <span class="s1">hostname</span><span class="s2">,</span>
+        <span class="s1">port</span><span class="s2">,</span>
+        <span class="s1">application</span><span class="s2">,</span>
+        <span class="s1">threaded</span><span class="s2">,</span>
+        <span class="s1">processes</span><span class="s2">,</span>
+        <span class="s1">request_handler</span><span class="s2">,</span>
+        <span class="s1">passthrough_errors</span><span class="s2">,</span>
+        <span class="s1">ssl_context</span><span class="s2">,</span>
+        <span class="s1">fd=fd</span><span class="s2">,</span>
+    <span class="s1">)</span>
+    <span class="s1">srv.socket.set_inheritable(</span><span class="s2">True</span><span class="s1">)</span>
+    <span class="s1">os.environ[</span><span class="s4">&quot;WERKZEUG_SERVER_FD&quot;</span><span class="s1">] = str(srv.fileno())</span>
+
+    <span class="s2">if not </span><span class="s1">is_running_from_reloader():</span>
+        <span class="s1">srv.log_startup()</span>
+        <span class="s1">_log(</span><span class="s4">&quot;info&quot;</span><span class="s2">, </span><span class="s1">_ansi_style(</span><span class="s4">&quot;Press CTRL+C to quit&quot;</span><span class="s2">, </span><span class="s4">&quot;yellow&quot;</span><span class="s1">))</span>
+
+    <span class="s2">if </span><span class="s1">use_reloader:</span>
+        <span class="s2">from </span><span class="s1">._reloader </span><span class="s2">import </span><span class="s1">run_with_reloader</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">run_with_reloader(</span>
+                <span class="s1">srv.serve_forever</span><span class="s2">,</span>
+                <span class="s1">extra_files=extra_files</span><span class="s2">,</span>
+                <span class="s1">exclude_patterns=exclude_patterns</span><span class="s2">,</span>
+                <span class="s1">interval=reloader_interval</span><span class="s2">,</span>
+                <span class="s1">reloader_type=reloader_type</span><span class="s2">,</span>
+            <span class="s1">)</span>
+        <span class="s2">finally</span><span class="s1">:</span>
+            <span class="s1">srv.server_close()</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">srv.serve_forever()</span>
+</pre>
+</body>
+</html>

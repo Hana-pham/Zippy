@@ -1,0 +1,800 @@
+<html>
+<head>
+<title>install.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+install.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">errno</span>
+<span class="s0">import </span><span class="s1">json</span>
+<span class="s0">import </span><span class="s1">operator</span>
+<span class="s0">import </span><span class="s1">os</span>
+<span class="s0">import </span><span class="s1">shutil</span>
+<span class="s0">import </span><span class="s1">site</span>
+<span class="s0">from </span><span class="s1">optparse </span><span class="s0">import </span><span class="s1">SUPPRESS_HELP</span><span class="s0">, </span><span class="s1">Values</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">List</span><span class="s0">, </span><span class="s1">Optional</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.rich </span><span class="s0">import </span><span class="s1">print_json</span>
+
+<span class="s0">from </span><span class="s1">pip._internal.cache </span><span class="s0">import </span><span class="s1">WheelCache</span>
+<span class="s0">from </span><span class="s1">pip._internal.cli </span><span class="s0">import </span><span class="s1">cmdoptions</span>
+<span class="s0">from </span><span class="s1">pip._internal.cli.cmdoptions </span><span class="s0">import </span><span class="s1">make_target_python</span>
+<span class="s0">from </span><span class="s1">pip._internal.cli.req_command </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">RequirementCommand</span><span class="s0">,</span>
+    <span class="s1">warn_if_run_as_root</span><span class="s0">,</span>
+    <span class="s1">with_cleanup</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">pip._internal.cli.status_codes </span><span class="s0">import </span><span class="s1">ERROR</span><span class="s0">, </span><span class="s1">SUCCESS</span>
+<span class="s0">from </span><span class="s1">pip._internal.exceptions </span><span class="s0">import </span><span class="s1">CommandError</span><span class="s0">, </span><span class="s1">InstallationError</span>
+<span class="s0">from </span><span class="s1">pip._internal.locations </span><span class="s0">import </span><span class="s1">get_scheme</span>
+<span class="s0">from </span><span class="s1">pip._internal.metadata </span><span class="s0">import </span><span class="s1">get_environment</span>
+<span class="s0">from </span><span class="s1">pip._internal.models.installation_report </span><span class="s0">import </span><span class="s1">InstallationReport</span>
+<span class="s0">from </span><span class="s1">pip._internal.operations.build.build_tracker </span><span class="s0">import </span><span class="s1">get_build_tracker</span>
+<span class="s0">from </span><span class="s1">pip._internal.operations.check </span><span class="s0">import </span><span class="s1">ConflictDetails</span><span class="s0">, </span><span class="s1">check_install_conflicts</span>
+<span class="s0">from </span><span class="s1">pip._internal.req </span><span class="s0">import </span><span class="s1">install_given_reqs</span>
+<span class="s0">from </span><span class="s1">pip._internal.req.req_install </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">InstallRequirement</span><span class="s0">,</span>
+    <span class="s1">check_legacy_setup_py_options</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.compat </span><span class="s0">import </span><span class="s1">WINDOWS</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.filesystem </span><span class="s0">import </span><span class="s1">test_writable_dir</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.logging </span><span class="s0">import </span><span class="s1">getLogger</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.misc </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">check_externally_managed</span><span class="s0">,</span>
+    <span class="s1">ensure_dir</span><span class="s0">,</span>
+    <span class="s1">get_pip_version</span><span class="s0">,</span>
+    <span class="s1">protect_pip_from_modification_on_windows</span><span class="s0">,</span>
+    <span class="s1">write_output</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.temp_dir </span><span class="s0">import </span><span class="s1">TempDirectory</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.virtualenv </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">running_under_virtualenv</span><span class="s0">,</span>
+    <span class="s1">virtualenv_no_global</span><span class="s0">,</span>
+<span class="s1">)</span>
+<span class="s0">from </span><span class="s1">pip._internal.wheel_builder </span><span class="s0">import </span><span class="s1">build</span><span class="s0">, </span><span class="s1">should_build_for_install_command</span>
+
+<span class="s1">logger = getLogger(__name__)</span>
+
+
+<span class="s0">class </span><span class="s1">InstallCommand(RequirementCommand):</span>
+    <span class="s2">&quot;&quot;&quot; 
+    Install packages from: 
+ 
+    - PyPI (and other indexes) using requirement specifiers. 
+    - VCS project urls. 
+    - Local project directories. 
+    - Local or remote source archives. 
+ 
+    pip also supports installing from &quot;requirements files&quot;, which provide 
+    an easy way to specify a whole environment to be installed. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">usage = </span><span class="s3">&quot;&quot;&quot; 
+      %prog [options] &lt;requirement specifier&gt; [package-index-options] ... 
+      %prog [options] -r &lt;requirements file&gt; [package-index-options] ... 
+      %prog [options] [-e] &lt;vcs project url&gt; ... 
+      %prog [options] [-e] &lt;local project path&gt; ... 
+      %prog [options] &lt;archive url/path&gt; ...&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">add_options(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.requirements())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.constraints())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.no_deps())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.pre())</span>
+
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.editable())</span>
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--dry-run&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;dry_run&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">False,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Don't actually install anything, just print what would be. &quot;</span>
+                <span class="s3">&quot;Can be used in combination with --ignore-installed &quot;</span>
+                <span class="s3">&quot;to 'resolve' the requirements.&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;-t&quot;</span><span class="s0">,</span>
+            <span class="s3">&quot;--target&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;target_dir&quot;</span><span class="s0">,</span>
+            <span class="s1">metavar=</span><span class="s3">&quot;dir&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">None,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Install packages into &lt;dir&gt;. &quot;</span>
+                <span class="s3">&quot;By default this will not replace existing files/folders in &quot;</span>
+                <span class="s3">&quot;&lt;dir&gt;. Use --upgrade to replace existing packages in &lt;dir&gt; &quot;</span>
+                <span class="s3">&quot;with new versions.&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">cmdoptions.add_target_python_options(self.cmd_opts)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--user&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;use_user_site&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s0">,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Install to the Python user install directory for your &quot;</span>
+                <span class="s3">&quot;platform. Typically ~/.local/, or %APPDATA%</span><span class="s0">\\</span><span class="s3">Python on &quot;</span>
+                <span class="s3">&quot;Windows. (See the Python documentation for site.USER_BASE &quot;</span>
+                <span class="s3">&quot;for full details.)&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--no-user&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;use_user_site&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_false&quot;</span><span class="s0">,</span>
+            <span class="s1">help=SUPPRESS_HELP</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--root&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;root_path&quot;</span><span class="s0">,</span>
+            <span class="s1">metavar=</span><span class="s3">&quot;dir&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">None,</span>
+            <span class="s1">help=</span><span class="s3">&quot;Install everything relative to this alternate root directory.&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--prefix&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;prefix_path&quot;</span><span class="s0">,</span>
+            <span class="s1">metavar=</span><span class="s3">&quot;dir&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">None,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Installation prefix where lib, bin and other top-level &quot;</span>
+                <span class="s3">&quot;folders are placed. Note that the resulting installation may &quot;</span>
+                <span class="s3">&quot;contain scripts and other resources which reference the &quot;</span>
+                <span class="s3">&quot;Python interpreter of pip, and not that of ``--prefix``. &quot;</span>
+                <span class="s3">&quot;See also the ``--python`` option if the intention is to &quot;</span>
+                <span class="s3">&quot;install packages into another (possibly pip-free) &quot;</span>
+                <span class="s3">&quot;environment.&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.src())</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;-U&quot;</span><span class="s0">,</span>
+            <span class="s3">&quot;--upgrade&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;upgrade&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s0">,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Upgrade all specified packages to the newest available &quot;</span>
+                <span class="s3">&quot;version. The handling of dependencies depends on the &quot;</span>
+                <span class="s3">&quot;upgrade-strategy used.&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--upgrade-strategy&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;upgrade_strategy&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s3">&quot;only-if-needed&quot;</span><span class="s0">,</span>
+            <span class="s1">choices=[</span><span class="s3">&quot;only-if-needed&quot;</span><span class="s0">, </span><span class="s3">&quot;eager&quot;</span><span class="s1">]</span><span class="s0">,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Determines how dependency upgrading should be handled &quot;</span>
+                <span class="s3">&quot;[default: %default]. &quot;</span>
+                <span class="s3">'&quot;eager&quot; - dependencies are upgraded regardless of '</span>
+                <span class="s3">&quot;whether the currently installed version satisfies the &quot;</span>
+                <span class="s3">&quot;requirements of the upgraded package(s). &quot;</span>
+                <span class="s3">'&quot;only-if-needed&quot; -  are upgraded only when they do not '</span>
+                <span class="s3">&quot;satisfy the requirements of the upgraded package(s).&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--force-reinstall&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;force_reinstall&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s0">,</span>
+            <span class="s1">help=</span><span class="s3">&quot;Reinstall all packages even if they are already up-to-date.&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;-I&quot;</span><span class="s0">,</span>
+            <span class="s3">&quot;--ignore-installed&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;ignore_installed&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s0">,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Ignore the installed packages, overwriting them. &quot;</span>
+                <span class="s3">&quot;This can break your system if the existing package &quot;</span>
+                <span class="s3">&quot;is of a different version or was installed &quot;</span>
+                <span class="s3">&quot;with a different package manager!&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.ignore_requires_python())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.no_build_isolation())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.use_pep517())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.no_use_pep517())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.check_build_deps())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.override_externally_managed())</span>
+
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.config_settings())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.global_options())</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--compile&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_true&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;compile&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">True,</span>
+            <span class="s1">help=</span><span class="s3">&quot;Compile Python source files to bytecode&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--no-compile&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_false&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;compile&quot;</span><span class="s0">,</span>
+            <span class="s1">help=</span><span class="s3">&quot;Do not compile Python source files to bytecode&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--no-warn-script-location&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_false&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;warn_script_location&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">True,</span>
+            <span class="s1">help=</span><span class="s3">&quot;Do not warn when installing scripts outside PATH&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--no-warn-conflicts&quot;</span><span class="s0">,</span>
+            <span class="s1">action=</span><span class="s3">&quot;store_false&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;warn_about_conflicts&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">True,</span>
+            <span class="s1">help=</span><span class="s3">&quot;Do not warn about broken dependencies&quot;</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.no_binary())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.only_binary())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.prefer_binary())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.require_hashes())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.progress_bar())</span>
+        <span class="s1">self.cmd_opts.add_option(cmdoptions.root_user_action())</span>
+
+        <span class="s1">index_opts = cmdoptions.make_option_group(</span>
+            <span class="s1">cmdoptions.index_group</span><span class="s0">,</span>
+            <span class="s1">self.parser</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">self.parser.insert_option_group(</span><span class="s4">0</span><span class="s0">, </span><span class="s1">index_opts)</span>
+        <span class="s1">self.parser.insert_option_group(</span><span class="s4">0</span><span class="s0">, </span><span class="s1">self.cmd_opts)</span>
+
+        <span class="s1">self.cmd_opts.add_option(</span>
+            <span class="s3">&quot;--report&quot;</span><span class="s0">,</span>
+            <span class="s1">dest=</span><span class="s3">&quot;json_report_file&quot;</span><span class="s0">,</span>
+            <span class="s1">metavar=</span><span class="s3">&quot;file&quot;</span><span class="s0">,</span>
+            <span class="s1">default=</span><span class="s0">None,</span>
+            <span class="s1">help=(</span>
+                <span class="s3">&quot;Generate a JSON file describing what pip did to install &quot;</span>
+                <span class="s3">&quot;the provided requirements. &quot;</span>
+                <span class="s3">&quot;Can be used in combination with --dry-run and --ignore-installed &quot;</span>
+                <span class="s3">&quot;to 'resolve' the requirements. &quot;</span>
+                <span class="s3">&quot;When - is used as file name it writes to stdout. &quot;</span>
+                <span class="s3">&quot;When writing to stdout, please combine with the --quiet option &quot;</span>
+                <span class="s3">&quot;to avoid mixing pip logging output with JSON output.&quot;</span>
+            <span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">@with_cleanup</span>
+    <span class="s0">def </span><span class="s1">run(self</span><span class="s0">, </span><span class="s1">options: Values</span><span class="s0">, </span><span class="s1">args: List[str]) -&gt; int:</span>
+        <span class="s0">if </span><span class="s1">options.use_user_site </span><span class="s0">and </span><span class="s1">options.target_dir </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">raise </span><span class="s1">CommandError(</span><span class="s3">&quot;Can not combine '--user' and '--target'&quot;</span><span class="s1">)</span>
+
+        <span class="s5"># Check whether the environment we're installing into is externally</span>
+        <span class="s5"># managed, as specified in PEP 668. Specifying --root, --target, or</span>
+        <span class="s5"># --prefix disables the check, since there's no reliable way to locate</span>
+        <span class="s5"># the EXTERNALLY-MANAGED file for those cases. An exception is also</span>
+        <span class="s5"># made specifically for &quot;--dry-run --report&quot; for convenience.</span>
+        <span class="s1">installing_into_current_environment = (</span>
+            <span class="s0">not </span><span class="s1">(options.dry_run </span><span class="s0">and </span><span class="s1">options.json_report_file)</span>
+            <span class="s0">and </span><span class="s1">options.root_path </span><span class="s0">is None</span>
+            <span class="s0">and </span><span class="s1">options.target_dir </span><span class="s0">is None</span>
+            <span class="s0">and </span><span class="s1">options.prefix_path </span><span class="s0">is None</span>
+        <span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">(</span>
+            <span class="s1">installing_into_current_environment</span>
+            <span class="s0">and not </span><span class="s1">options.override_externally_managed</span>
+        <span class="s1">):</span>
+            <span class="s1">check_externally_managed()</span>
+
+        <span class="s1">upgrade_strategy = </span><span class="s3">&quot;to-satisfy-only&quot;</span>
+        <span class="s0">if </span><span class="s1">options.upgrade:</span>
+            <span class="s1">upgrade_strategy = options.upgrade_strategy</span>
+
+        <span class="s1">cmdoptions.check_dist_restriction(options</span><span class="s0">, </span><span class="s1">check_target=</span><span class="s0">True</span><span class="s1">)</span>
+
+        <span class="s1">logger.verbose(</span><span class="s3">&quot;Using %s&quot;</span><span class="s0">, </span><span class="s1">get_pip_version())</span>
+        <span class="s1">options.use_user_site = decide_user_install(</span>
+            <span class="s1">options.use_user_site</span><span class="s0">,</span>
+            <span class="s1">prefix_path=options.prefix_path</span><span class="s0">,</span>
+            <span class="s1">target_dir=options.target_dir</span><span class="s0">,</span>
+            <span class="s1">root_path=options.root_path</span><span class="s0">,</span>
+            <span class="s1">isolated_mode=options.isolated_mode</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">target_temp_dir: Optional[TempDirectory] = </span><span class="s0">None</span>
+        <span class="s1">target_temp_dir_path: Optional[str] = </span><span class="s0">None</span>
+        <span class="s0">if </span><span class="s1">options.target_dir:</span>
+            <span class="s1">options.ignore_installed = </span><span class="s0">True</span>
+            <span class="s1">options.target_dir = os.path.abspath(options.target_dir)</span>
+            <span class="s0">if </span><span class="s1">(</span>
+                <span class="s5"># fmt: off</span>
+                <span class="s1">os.path.exists(options.target_dir) </span><span class="s0">and</span>
+                <span class="s0">not </span><span class="s1">os.path.isdir(options.target_dir)</span>
+                <span class="s5"># fmt: on</span>
+            <span class="s1">):</span>
+                <span class="s0">raise </span><span class="s1">CommandError(</span>
+                    <span class="s3">&quot;Target path exists but is not a directory, will not continue.&quot;</span>
+                <span class="s1">)</span>
+
+            <span class="s5"># Create a target directory for using with the target option</span>
+            <span class="s1">target_temp_dir = TempDirectory(kind=</span><span class="s3">&quot;target&quot;</span><span class="s1">)</span>
+            <span class="s1">target_temp_dir_path = target_temp_dir.path</span>
+            <span class="s1">self.enter_context(target_temp_dir)</span>
+
+        <span class="s1">global_options = options.global_options </span><span class="s0">or </span><span class="s1">[]</span>
+
+        <span class="s1">session = self.get_default_session(options)</span>
+
+        <span class="s1">target_python = make_target_python(options)</span>
+        <span class="s1">finder = self._build_package_finder(</span>
+            <span class="s1">options=options</span><span class="s0">,</span>
+            <span class="s1">session=session</span><span class="s0">,</span>
+            <span class="s1">target_python=target_python</span><span class="s0">,</span>
+            <span class="s1">ignore_requires_python=options.ignore_requires_python</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s1">build_tracker = self.enter_context(get_build_tracker())</span>
+
+        <span class="s1">directory = TempDirectory(</span>
+            <span class="s1">delete=</span><span class="s0">not </span><span class="s1">options.no_clean</span><span class="s0">,</span>
+            <span class="s1">kind=</span><span class="s3">&quot;install&quot;</span><span class="s0">,</span>
+            <span class="s1">globally_managed=</span><span class="s0">True,</span>
+        <span class="s1">)</span>
+
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s1">reqs = self.get_requirements(args</span><span class="s0">, </span><span class="s1">options</span><span class="s0">, </span><span class="s1">finder</span><span class="s0">, </span><span class="s1">session)</span>
+            <span class="s1">check_legacy_setup_py_options(options</span><span class="s0">, </span><span class="s1">reqs)</span>
+
+            <span class="s1">wheel_cache = WheelCache(options.cache_dir)</span>
+
+            <span class="s5"># Only when installing is it permitted to use PEP 660.</span>
+            <span class="s5"># In other circumstances (pip wheel, pip download) we generate</span>
+            <span class="s5"># regular (i.e. non editable) metadata and wheels.</span>
+            <span class="s0">for </span><span class="s1">req </span><span class="s0">in </span><span class="s1">reqs:</span>
+                <span class="s1">req.permit_editable_wheels = </span><span class="s0">True</span>
+
+            <span class="s1">preparer = self.make_requirement_preparer(</span>
+                <span class="s1">temp_build_dir=directory</span><span class="s0">,</span>
+                <span class="s1">options=options</span><span class="s0">,</span>
+                <span class="s1">build_tracker=build_tracker</span><span class="s0">,</span>
+                <span class="s1">session=session</span><span class="s0">,</span>
+                <span class="s1">finder=finder</span><span class="s0">,</span>
+                <span class="s1">use_user_site=options.use_user_site</span><span class="s0">,</span>
+                <span class="s1">verbosity=self.verbosity</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s1">resolver = self.make_resolver(</span>
+                <span class="s1">preparer=preparer</span><span class="s0">,</span>
+                <span class="s1">finder=finder</span><span class="s0">,</span>
+                <span class="s1">options=options</span><span class="s0">,</span>
+                <span class="s1">wheel_cache=wheel_cache</span><span class="s0">,</span>
+                <span class="s1">use_user_site=options.use_user_site</span><span class="s0">,</span>
+                <span class="s1">ignore_installed=options.ignore_installed</span><span class="s0">,</span>
+                <span class="s1">ignore_requires_python=options.ignore_requires_python</span><span class="s0">,</span>
+                <span class="s1">force_reinstall=options.force_reinstall</span><span class="s0">,</span>
+                <span class="s1">upgrade_strategy=upgrade_strategy</span><span class="s0">,</span>
+                <span class="s1">use_pep517=options.use_pep517</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+            <span class="s1">self.trace_basic_info(finder)</span>
+
+            <span class="s1">requirement_set = resolver.resolve(</span>
+                <span class="s1">reqs</span><span class="s0">, </span><span class="s1">check_supported_wheels=</span><span class="s0">not </span><span class="s1">options.target_dir</span>
+            <span class="s1">)</span>
+
+            <span class="s0">if </span><span class="s1">options.json_report_file:</span>
+                <span class="s1">report = InstallationReport(requirement_set.requirements_to_install)</span>
+                <span class="s0">if </span><span class="s1">options.json_report_file == </span><span class="s3">&quot;-&quot;</span><span class="s1">:</span>
+                    <span class="s1">print_json(data=report.to_dict())</span>
+                <span class="s0">else</span><span class="s1">:</span>
+                    <span class="s0">with </span><span class="s1">open(options.json_report_file</span><span class="s0">, </span><span class="s3">&quot;w&quot;</span><span class="s0">, </span><span class="s1">encoding=</span><span class="s3">&quot;utf-8&quot;</span><span class="s1">) </span><span class="s0">as </span><span class="s1">f:</span>
+                        <span class="s1">json.dump(report.to_dict()</span><span class="s0">, </span><span class="s1">f</span><span class="s0">, </span><span class="s1">indent=</span><span class="s4">2</span><span class="s0">, </span><span class="s1">ensure_ascii=</span><span class="s0">False</span><span class="s1">)</span>
+
+            <span class="s0">if </span><span class="s1">options.dry_run:</span>
+                <span class="s5"># In non dry-run mode, the legacy versions and specifiers check</span>
+                <span class="s5"># will be done as part of conflict detection.</span>
+                <span class="s1">requirement_set.warn_legacy_versions_and_specifiers()</span>
+                <span class="s1">would_install_items = sorted(</span>
+                    <span class="s1">(r.metadata[</span><span class="s3">&quot;name&quot;</span><span class="s1">]</span><span class="s0">, </span><span class="s1">r.metadata[</span><span class="s3">&quot;version&quot;</span><span class="s1">])</span>
+                    <span class="s0">for </span><span class="s1">r </span><span class="s0">in </span><span class="s1">requirement_set.requirements_to_install</span>
+                <span class="s1">)</span>
+                <span class="s0">if </span><span class="s1">would_install_items:</span>
+                    <span class="s1">write_output(</span>
+                        <span class="s3">&quot;Would install %s&quot;</span><span class="s0">,</span>
+                        <span class="s3">&quot; &quot;</span><span class="s1">.join(</span><span class="s3">&quot;-&quot;</span><span class="s1">.join(item) </span><span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s1">would_install_items)</span><span class="s0">,</span>
+                    <span class="s1">)</span>
+                <span class="s0">return </span><span class="s1">SUCCESS</span>
+
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s1">pip_req = requirement_set.get_requirement(</span><span class="s3">&quot;pip&quot;</span><span class="s1">)</span>
+            <span class="s0">except </span><span class="s1">KeyError:</span>
+                <span class="s1">modifying_pip = </span><span class="s0">False</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s5"># If we're not replacing an already installed pip,</span>
+                <span class="s5"># we're not modifying it.</span>
+                <span class="s1">modifying_pip = pip_req.satisfied_by </span><span class="s0">is None</span>
+            <span class="s1">protect_pip_from_modification_on_windows(modifying_pip=modifying_pip)</span>
+
+            <span class="s1">reqs_to_build = [</span>
+                <span class="s1">r</span>
+                <span class="s0">for </span><span class="s1">r </span><span class="s0">in </span><span class="s1">requirement_set.requirements.values()</span>
+                <span class="s0">if </span><span class="s1">should_build_for_install_command(r)</span>
+            <span class="s1">]</span>
+
+            <span class="s1">_</span><span class="s0">, </span><span class="s1">build_failures = build(</span>
+                <span class="s1">reqs_to_build</span><span class="s0">,</span>
+                <span class="s1">wheel_cache=wheel_cache</span><span class="s0">,</span>
+                <span class="s1">verify=</span><span class="s0">True,</span>
+                <span class="s1">build_options=[]</span><span class="s0">,</span>
+                <span class="s1">global_options=global_options</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+            <span class="s0">if </span><span class="s1">build_failures:</span>
+                <span class="s0">raise </span><span class="s1">InstallationError(</span>
+                    <span class="s3">&quot;Could not build wheels for {}, which is required to &quot;</span>
+                    <span class="s3">&quot;install pyproject.toml-based projects&quot;</span><span class="s1">.format(</span>
+                        <span class="s3">&quot;, &quot;</span><span class="s1">.join(r.name </span><span class="s0">for </span><span class="s1">r </span><span class="s0">in </span><span class="s1">build_failures)  </span><span class="s5"># type: ignore</span>
+                    <span class="s1">)</span>
+                <span class="s1">)</span>
+
+            <span class="s1">to_install = resolver.get_installation_order(requirement_set)</span>
+
+            <span class="s5"># Check for conflicts in the package set we're installing.</span>
+            <span class="s1">conflicts: Optional[ConflictDetails] = </span><span class="s0">None</span>
+            <span class="s1">should_warn_about_conflicts = (</span>
+                <span class="s0">not </span><span class="s1">options.ignore_dependencies </span><span class="s0">and </span><span class="s1">options.warn_about_conflicts</span>
+            <span class="s1">)</span>
+            <span class="s0">if </span><span class="s1">should_warn_about_conflicts:</span>
+                <span class="s1">conflicts = self._determine_conflicts(to_install)</span>
+
+            <span class="s5"># Don't warn about script install locations if</span>
+            <span class="s5"># --target or --prefix has been specified</span>
+            <span class="s1">warn_script_location = options.warn_script_location</span>
+            <span class="s0">if </span><span class="s1">options.target_dir </span><span class="s0">or </span><span class="s1">options.prefix_path:</span>
+                <span class="s1">warn_script_location = </span><span class="s0">False</span>
+
+            <span class="s1">installed = install_given_reqs(</span>
+                <span class="s1">to_install</span><span class="s0">,</span>
+                <span class="s1">global_options</span><span class="s0">,</span>
+                <span class="s1">root=options.root_path</span><span class="s0">,</span>
+                <span class="s1">home=target_temp_dir_path</span><span class="s0">,</span>
+                <span class="s1">prefix=options.prefix_path</span><span class="s0">,</span>
+                <span class="s1">warn_script_location=warn_script_location</span><span class="s0">,</span>
+                <span class="s1">use_user_site=options.use_user_site</span><span class="s0">,</span>
+                <span class="s1">pycompile=options.compile</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+            <span class="s1">lib_locations = get_lib_location_guesses(</span>
+                <span class="s1">user=options.use_user_site</span><span class="s0">,</span>
+                <span class="s1">home=target_temp_dir_path</span><span class="s0">,</span>
+                <span class="s1">root=options.root_path</span><span class="s0">,</span>
+                <span class="s1">prefix=options.prefix_path</span><span class="s0">,</span>
+                <span class="s1">isolated=options.isolated_mode</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s1">env = get_environment(lib_locations)</span>
+
+            <span class="s1">installed.sort(key=operator.attrgetter(</span><span class="s3">&quot;name&quot;</span><span class="s1">))</span>
+            <span class="s1">items = []</span>
+            <span class="s0">for </span><span class="s1">result </span><span class="s0">in </span><span class="s1">installed:</span>
+                <span class="s1">item = result.name</span>
+                <span class="s0">try</span><span class="s1">:</span>
+                    <span class="s1">installed_dist = env.get_distribution(item)</span>
+                    <span class="s0">if </span><span class="s1">installed_dist </span><span class="s0">is not None</span><span class="s1">:</span>
+                        <span class="s1">item = </span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">item</span><span class="s0">}</span><span class="s3">-</span><span class="s0">{</span><span class="s1">installed_dist.version</span><span class="s0">}</span><span class="s3">&quot;</span>
+                <span class="s0">except </span><span class="s1">Exception:</span>
+                    <span class="s0">pass</span>
+                <span class="s1">items.append(item)</span>
+
+            <span class="s0">if </span><span class="s1">conflicts </span><span class="s0">is not None</span><span class="s1">:</span>
+                <span class="s1">self._warn_about_conflicts(</span>
+                    <span class="s1">conflicts</span><span class="s0">,</span>
+                    <span class="s1">resolver_variant=self.determine_resolver_variant(options)</span><span class="s0">,</span>
+                <span class="s1">)</span>
+
+            <span class="s1">installed_desc = </span><span class="s3">&quot; &quot;</span><span class="s1">.join(items)</span>
+            <span class="s0">if </span><span class="s1">installed_desc:</span>
+                <span class="s1">write_output(</span>
+                    <span class="s3">&quot;Successfully installed %s&quot;</span><span class="s0">,</span>
+                    <span class="s1">installed_desc</span><span class="s0">,</span>
+                <span class="s1">)</span>
+        <span class="s0">except </span><span class="s1">OSError </span><span class="s0">as </span><span class="s1">error:</span>
+            <span class="s1">show_traceback = self.verbosity &gt;= </span><span class="s4">1</span>
+
+            <span class="s1">message = create_os_error_message(</span>
+                <span class="s1">error</span><span class="s0">,</span>
+                <span class="s1">show_traceback</span><span class="s0">,</span>
+                <span class="s1">options.use_user_site</span><span class="s0">,</span>
+            <span class="s1">)</span>
+            <span class="s1">logger.error(message</span><span class="s0">, </span><span class="s1">exc_info=show_traceback)  </span><span class="s5"># noqa</span>
+
+            <span class="s0">return </span><span class="s1">ERROR</span>
+
+        <span class="s0">if </span><span class="s1">options.target_dir:</span>
+            <span class="s0">assert </span><span class="s1">target_temp_dir</span>
+            <span class="s1">self._handle_target_dir(</span>
+                <span class="s1">options.target_dir</span><span class="s0">, </span><span class="s1">target_temp_dir</span><span class="s0">, </span><span class="s1">options.upgrade</span>
+            <span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">options.root_user_action == </span><span class="s3">&quot;warn&quot;</span><span class="s1">:</span>
+            <span class="s1">warn_if_run_as_root()</span>
+        <span class="s0">return </span><span class="s1">SUCCESS</span>
+
+    <span class="s0">def </span><span class="s1">_handle_target_dir(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">target_dir: str</span><span class="s0">, </span><span class="s1">target_temp_dir: TempDirectory</span><span class="s0">, </span><span class="s1">upgrade: bool</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">ensure_dir(target_dir)</span>
+
+        <span class="s5"># Checking both purelib and platlib directories for installed</span>
+        <span class="s5"># packages to be moved to target directory</span>
+        <span class="s1">lib_dir_list = []</span>
+
+        <span class="s5"># Checking both purelib and platlib directories for installed</span>
+        <span class="s5"># packages to be moved to target directory</span>
+        <span class="s1">scheme = get_scheme(</span><span class="s3">&quot;&quot;</span><span class="s0">, </span><span class="s1">home=target_temp_dir.path)</span>
+        <span class="s1">purelib_dir = scheme.purelib</span>
+        <span class="s1">platlib_dir = scheme.platlib</span>
+        <span class="s1">data_dir = scheme.data</span>
+
+        <span class="s0">if </span><span class="s1">os.path.exists(purelib_dir):</span>
+            <span class="s1">lib_dir_list.append(purelib_dir)</span>
+        <span class="s0">if </span><span class="s1">os.path.exists(platlib_dir) </span><span class="s0">and </span><span class="s1">platlib_dir != purelib_dir:</span>
+            <span class="s1">lib_dir_list.append(platlib_dir)</span>
+        <span class="s0">if </span><span class="s1">os.path.exists(data_dir):</span>
+            <span class="s1">lib_dir_list.append(data_dir)</span>
+
+        <span class="s0">for </span><span class="s1">lib_dir </span><span class="s0">in </span><span class="s1">lib_dir_list:</span>
+            <span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s1">os.listdir(lib_dir):</span>
+                <span class="s0">if </span><span class="s1">lib_dir == data_dir:</span>
+                    <span class="s1">ddir = os.path.join(data_dir</span><span class="s0">, </span><span class="s1">item)</span>
+                    <span class="s0">if </span><span class="s1">any(s.startswith(ddir) </span><span class="s0">for </span><span class="s1">s </span><span class="s0">in </span><span class="s1">lib_dir_list[:-</span><span class="s4">1</span><span class="s1">]):</span>
+                        <span class="s0">continue</span>
+                <span class="s1">target_item_dir = os.path.join(target_dir</span><span class="s0">, </span><span class="s1">item)</span>
+                <span class="s0">if </span><span class="s1">os.path.exists(target_item_dir):</span>
+                    <span class="s0">if not </span><span class="s1">upgrade:</span>
+                        <span class="s1">logger.warning(</span>
+                            <span class="s3">&quot;Target directory %s already exists. Specify &quot;</span>
+                            <span class="s3">&quot;--upgrade to force replacement.&quot;</span><span class="s0">,</span>
+                            <span class="s1">target_item_dir</span><span class="s0">,</span>
+                        <span class="s1">)</span>
+                        <span class="s0">continue</span>
+                    <span class="s0">if </span><span class="s1">os.path.islink(target_item_dir):</span>
+                        <span class="s1">logger.warning(</span>
+                            <span class="s3">&quot;Target directory %s already exists and is &quot;</span>
+                            <span class="s3">&quot;a link. pip will not automatically replace &quot;</span>
+                            <span class="s3">&quot;links, please remove if replacement is &quot;</span>
+                            <span class="s3">&quot;desired.&quot;</span><span class="s0">,</span>
+                            <span class="s1">target_item_dir</span><span class="s0">,</span>
+                        <span class="s1">)</span>
+                        <span class="s0">continue</span>
+                    <span class="s0">if </span><span class="s1">os.path.isdir(target_item_dir):</span>
+                        <span class="s1">shutil.rmtree(target_item_dir)</span>
+                    <span class="s0">else</span><span class="s1">:</span>
+                        <span class="s1">os.remove(target_item_dir)</span>
+
+                <span class="s1">shutil.move(os.path.join(lib_dir</span><span class="s0">, </span><span class="s1">item)</span><span class="s0">, </span><span class="s1">target_item_dir)</span>
+
+    <span class="s0">def </span><span class="s1">_determine_conflicts(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">to_install: List[InstallRequirement]</span>
+    <span class="s1">) -&gt; Optional[ConflictDetails]:</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">check_install_conflicts(to_install)</span>
+        <span class="s0">except </span><span class="s1">Exception:</span>
+            <span class="s1">logger.exception(</span>
+                <span class="s3">&quot;Error while checking for conflicts. Please file an issue on &quot;</span>
+                <span class="s3">&quot;pip's issue tracker: https://github.com/pypa/pip/issues/new&quot;</span>
+            <span class="s1">)</span>
+            <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">_warn_about_conflicts(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">conflict_details: ConflictDetails</span><span class="s0">, </span><span class="s1">resolver_variant: str</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">package_set</span><span class="s0">, </span><span class="s1">(missing</span><span class="s0">, </span><span class="s1">conflicting) = conflict_details</span>
+        <span class="s0">if not </span><span class="s1">missing </span><span class="s0">and not </span><span class="s1">conflicting:</span>
+            <span class="s0">return</span>
+
+        <span class="s1">parts: List[str] = []</span>
+        <span class="s0">if </span><span class="s1">resolver_variant == </span><span class="s3">&quot;legacy&quot;</span><span class="s1">:</span>
+            <span class="s1">parts.append(</span>
+                <span class="s3">&quot;pip's legacy dependency resolver does not consider dependency &quot;</span>
+                <span class="s3">&quot;conflicts when selecting packages. This behaviour is the &quot;</span>
+                <span class="s3">&quot;source of the following dependency conflicts.&quot;</span>
+            <span class="s1">)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s0">assert </span><span class="s1">resolver_variant == </span><span class="s3">&quot;2020-resolver&quot;</span>
+            <span class="s1">parts.append(</span>
+                <span class="s3">&quot;pip's dependency resolver does not currently take into account &quot;</span>
+                <span class="s3">&quot;all the packages that are installed. This behaviour is the &quot;</span>
+                <span class="s3">&quot;source of the following dependency conflicts.&quot;</span>
+            <span class="s1">)</span>
+
+        <span class="s5"># NOTE: There is some duplication here, with commands/check.py</span>
+        <span class="s0">for </span><span class="s1">project_name </span><span class="s0">in </span><span class="s1">missing:</span>
+            <span class="s1">version = package_set[project_name][</span><span class="s4">0</span><span class="s1">]</span>
+            <span class="s0">for </span><span class="s1">dependency </span><span class="s0">in </span><span class="s1">missing[project_name]:</span>
+                <span class="s1">message = (</span>
+                    <span class="s3">&quot;{name} {version} requires {requirement}, &quot;</span>
+                    <span class="s3">&quot;which is not installed.&quot;</span>
+                <span class="s1">).format(</span>
+                    <span class="s1">name=project_name</span><span class="s0">,</span>
+                    <span class="s1">version=version</span><span class="s0">,</span>
+                    <span class="s1">requirement=dependency[</span><span class="s4">1</span><span class="s1">]</span><span class="s0">,</span>
+                <span class="s1">)</span>
+                <span class="s1">parts.append(message)</span>
+
+        <span class="s0">for </span><span class="s1">project_name </span><span class="s0">in </span><span class="s1">conflicting:</span>
+            <span class="s1">version = package_set[project_name][</span><span class="s4">0</span><span class="s1">]</span>
+            <span class="s0">for </span><span class="s1">dep_name</span><span class="s0">, </span><span class="s1">dep_version</span><span class="s0">, </span><span class="s1">req </span><span class="s0">in </span><span class="s1">conflicting[project_name]:</span>
+                <span class="s1">message = (</span>
+                    <span class="s3">&quot;{name} {version} requires {requirement}, but {you} have &quot;</span>
+                    <span class="s3">&quot;{dep_name} {dep_version} which is incompatible.&quot;</span>
+                <span class="s1">).format(</span>
+                    <span class="s1">name=project_name</span><span class="s0">,</span>
+                    <span class="s1">version=version</span><span class="s0">,</span>
+                    <span class="s1">requirement=req</span><span class="s0">,</span>
+                    <span class="s1">dep_name=dep_name</span><span class="s0">,</span>
+                    <span class="s1">dep_version=dep_version</span><span class="s0">,</span>
+                    <span class="s1">you=(</span><span class="s3">&quot;you&quot; </span><span class="s0">if </span><span class="s1">resolver_variant == </span><span class="s3">&quot;2020-resolver&quot; </span><span class="s0">else </span><span class="s3">&quot;you'll&quot;</span><span class="s1">)</span><span class="s0">,</span>
+                <span class="s1">)</span>
+                <span class="s1">parts.append(message)</span>
+
+        <span class="s1">logger.critical(</span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">.join(parts))</span>
+
+
+<span class="s0">def </span><span class="s1">get_lib_location_guesses(</span>
+    <span class="s1">user: bool = </span><span class="s0">False,</span>
+    <span class="s1">home: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">root: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">isolated: bool = </span><span class="s0">False,</span>
+    <span class="s1">prefix: Optional[str] = </span><span class="s0">None,</span>
+<span class="s1">) -&gt; List[str]:</span>
+    <span class="s1">scheme = get_scheme(</span>
+        <span class="s3">&quot;&quot;</span><span class="s0">,</span>
+        <span class="s1">user=user</span><span class="s0">,</span>
+        <span class="s1">home=home</span><span class="s0">,</span>
+        <span class="s1">root=root</span><span class="s0">,</span>
+        <span class="s1">isolated=isolated</span><span class="s0">,</span>
+        <span class="s1">prefix=prefix</span><span class="s0">,</span>
+    <span class="s1">)</span>
+    <span class="s0">return </span><span class="s1">[scheme.purelib</span><span class="s0">, </span><span class="s1">scheme.platlib]</span>
+
+
+<span class="s0">def </span><span class="s1">site_packages_writable(root: Optional[str]</span><span class="s0">, </span><span class="s1">isolated: bool) -&gt; bool:</span>
+    <span class="s0">return </span><span class="s1">all(</span>
+        <span class="s1">test_writable_dir(d)</span>
+        <span class="s0">for </span><span class="s1">d </span><span class="s0">in </span><span class="s1">set(get_lib_location_guesses(root=root</span><span class="s0">, </span><span class="s1">isolated=isolated))</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">decide_user_install(</span>
+    <span class="s1">use_user_site: Optional[bool]</span><span class="s0">,</span>
+    <span class="s1">prefix_path: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">target_dir: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">root_path: Optional[str] = </span><span class="s0">None,</span>
+    <span class="s1">isolated_mode: bool = </span><span class="s0">False,</span>
+<span class="s1">) -&gt; bool:</span>
+    <span class="s2">&quot;&quot;&quot;Determine whether to do a user install based on the input options. 
+ 
+    If use_user_site is False, no additional checks are done. 
+    If use_user_site is True, it is checked for compatibility with other 
+    options. 
+    If use_user_site is None, the default behaviour depends on the environment, 
+    which is provided by the other arguments. 
+    &quot;&quot;&quot;</span>
+    <span class="s5"># In some cases (config from tox), use_user_site can be set to an integer</span>
+    <span class="s5"># rather than a bool, which 'use_user_site is False' wouldn't catch.</span>
+    <span class="s0">if </span><span class="s1">(use_user_site </span><span class="s0">is not None</span><span class="s1">) </span><span class="s0">and </span><span class="s1">(</span><span class="s0">not </span><span class="s1">use_user_site):</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;Non-user install by explicit request&quot;</span><span class="s1">)</span>
+        <span class="s0">return False</span>
+
+    <span class="s0">if </span><span class="s1">use_user_site:</span>
+        <span class="s0">if </span><span class="s1">prefix_path:</span>
+            <span class="s0">raise </span><span class="s1">CommandError(</span>
+                <span class="s3">&quot;Can not combine '--user' and '--prefix' as they imply &quot;</span>
+                <span class="s3">&quot;different installation locations&quot;</span>
+            <span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">virtualenv_no_global():</span>
+            <span class="s0">raise </span><span class="s1">InstallationError(</span>
+                <span class="s3">&quot;Can not perform a '--user' install. User site-packages &quot;</span>
+                <span class="s3">&quot;are not visible in this virtualenv.&quot;</span>
+            <span class="s1">)</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;User install by explicit request&quot;</span><span class="s1">)</span>
+        <span class="s0">return True</span>
+
+    <span class="s5"># If we are here, user installs have not been explicitly requested/avoided</span>
+    <span class="s0">assert </span><span class="s1">use_user_site </span><span class="s0">is None</span>
+
+    <span class="s5"># user install incompatible with --prefix/--target</span>
+    <span class="s0">if </span><span class="s1">prefix_path </span><span class="s0">or </span><span class="s1">target_dir:</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;Non-user install due to --prefix or --target option&quot;</span><span class="s1">)</span>
+        <span class="s0">return False</span>
+
+    <span class="s5"># If user installs are not enabled, choose a non-user install</span>
+    <span class="s0">if not </span><span class="s1">site.ENABLE_USER_SITE:</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;Non-user install because user site-packages disabled&quot;</span><span class="s1">)</span>
+        <span class="s0">return False</span>
+
+    <span class="s5"># If we have permission for a non-user install, do that,</span>
+    <span class="s5"># otherwise do a user install.</span>
+    <span class="s0">if </span><span class="s1">site_packages_writable(root=root_path</span><span class="s0">, </span><span class="s1">isolated=isolated_mode):</span>
+        <span class="s1">logger.debug(</span><span class="s3">&quot;Non-user install because site-packages writeable&quot;</span><span class="s1">)</span>
+        <span class="s0">return False</span>
+
+    <span class="s1">logger.info(</span>
+        <span class="s3">&quot;Defaulting to user installation because normal site-packages &quot;</span>
+        <span class="s3">&quot;is not writeable&quot;</span>
+    <span class="s1">)</span>
+    <span class="s0">return True</span>
+
+
+<span class="s0">def </span><span class="s1">create_os_error_message(</span>
+    <span class="s1">error: OSError</span><span class="s0">, </span><span class="s1">show_traceback: bool</span><span class="s0">, </span><span class="s1">using_user_site: bool</span>
+<span class="s1">) -&gt; str:</span>
+    <span class="s2">&quot;&quot;&quot;Format an error message for an OSError 
+ 
+    It may occur anytime during the execution of the install command. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">parts = []</span>
+
+    <span class="s5"># Mention the error if we are not going to show a traceback</span>
+    <span class="s1">parts.append(</span><span class="s3">&quot;Could not install packages due to an OSError&quot;</span><span class="s1">)</span>
+    <span class="s0">if not </span><span class="s1">show_traceback:</span>
+        <span class="s1">parts.append(</span><span class="s3">&quot;: &quot;</span><span class="s1">)</span>
+        <span class="s1">parts.append(str(error))</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">parts.append(</span><span class="s3">&quot;.&quot;</span><span class="s1">)</span>
+
+    <span class="s5"># Spilt the error indication from a helper message (if any)</span>
+    <span class="s1">parts[-</span><span class="s4">1</span><span class="s1">] += </span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span>
+
+    <span class="s5"># Suggest useful actions to the user:</span>
+    <span class="s5">#  (1) using user site-packages or (2) verifying the permissions</span>
+    <span class="s0">if </span><span class="s1">error.errno == errno.EACCES:</span>
+        <span class="s1">user_option_part = </span><span class="s3">&quot;Consider using the `--user` option&quot;</span>
+        <span class="s1">permissions_part = </span><span class="s3">&quot;Check the permissions&quot;</span>
+
+        <span class="s0">if not </span><span class="s1">running_under_virtualenv() </span><span class="s0">and not </span><span class="s1">using_user_site:</span>
+            <span class="s1">parts.extend(</span>
+                <span class="s1">[</span>
+                    <span class="s1">user_option_part</span><span class="s0">,</span>
+                    <span class="s3">&quot; or &quot;</span><span class="s0">,</span>
+                    <span class="s1">permissions_part.lower()</span><span class="s0">,</span>
+                <span class="s1">]</span>
+            <span class="s1">)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">parts.append(permissions_part)</span>
+        <span class="s1">parts.append(</span><span class="s3">&quot;.</span><span class="s0">\n</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+    <span class="s5"># Suggest the user to enable Long Paths if path length is</span>
+    <span class="s5"># more than 260</span>
+    <span class="s0">if </span><span class="s1">(</span>
+        <span class="s1">WINDOWS</span>
+        <span class="s0">and </span><span class="s1">error.errno == errno.ENOENT</span>
+        <span class="s0">and </span><span class="s1">error.filename</span>
+        <span class="s0">and </span><span class="s1">len(error.filename) &gt; </span><span class="s4">260</span>
+    <span class="s1">):</span>
+        <span class="s1">parts.append(</span>
+            <span class="s3">&quot;HINT: This error might have occurred since &quot;</span>
+            <span class="s3">&quot;this system does not have Windows Long Path &quot;</span>
+            <span class="s3">&quot;support enabled. You can find information on &quot;</span>
+            <span class="s3">&quot;how to enable this at &quot;</span>
+            <span class="s3">&quot;https://pip.pypa.io/warnings/enable-long-paths</span><span class="s0">\n</span><span class="s3">&quot;</span>
+        <span class="s1">)</span>
+
+    <span class="s0">return </span><span class="s3">&quot;&quot;</span><span class="s1">.join(parts).strip() + </span><span class="s3">&quot;</span><span class="s0">\n</span><span class="s3">&quot;</span>
+</pre>
+</body>
+</html>

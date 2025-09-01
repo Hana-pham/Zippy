@@ -1,0 +1,213 @@
+<html>
+<head>
+<title>_tokenizer.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_tokenizer.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">contextlib</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">from </span><span class="s1">dataclasses </span><span class="s0">import </span><span class="s1">dataclass</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Dict</span><span class="s0">, </span><span class="s1">Iterator</span><span class="s0">, </span><span class="s1">NoReturn</span><span class="s0">, </span><span class="s1">Optional</span><span class="s0">, </span><span class="s1">Tuple</span><span class="s0">, </span><span class="s1">Union</span>
+
+<span class="s0">from </span><span class="s1">.specifiers </span><span class="s0">import </span><span class="s1">Specifier</span>
+
+
+<span class="s1">@dataclass</span>
+<span class="s0">class </span><span class="s1">Token:</span>
+    <span class="s1">name: str</span>
+    <span class="s1">text: str</span>
+    <span class="s1">position: int</span>
+
+
+<span class="s0">class </span><span class="s1">ParserSyntaxError(Exception):</span>
+    <span class="s2">&quot;&quot;&quot;The provided source text could not be parsed correctly.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">message: str</span><span class="s0">,</span>
+        <span class="s1">*</span><span class="s0">,</span>
+        <span class="s1">source: str</span><span class="s0">,</span>
+        <span class="s1">span: Tuple[int</span><span class="s0">, </span><span class="s1">int]</span><span class="s0">,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.span = span</span>
+        <span class="s1">self.message = message</span>
+        <span class="s1">self.source = source</span>
+
+        <span class="s1">super().__init__()</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self) -&gt; str:</span>
+        <span class="s1">marker = </span><span class="s3">&quot; &quot; </span><span class="s1">* self.span[</span><span class="s4">0</span><span class="s1">] + </span><span class="s3">&quot;~&quot; </span><span class="s1">* (self.span[</span><span class="s4">1</span><span class="s1">] - self.span[</span><span class="s4">0</span><span class="s1">]) + </span><span class="s3">&quot;^&quot;</span>
+        <span class="s0">return </span><span class="s3">&quot;</span><span class="s0">\n    </span><span class="s3">&quot;</span><span class="s1">.join([self.message</span><span class="s0">, </span><span class="s1">self.source</span><span class="s0">, </span><span class="s1">marker])</span>
+
+
+<span class="s1">DEFAULT_RULES: </span><span class="s3">&quot;Dict[str, Union[str, re.Pattern[str]]]&quot; </span><span class="s1">= {</span>
+    <span class="s3">&quot;LEFT_PARENTHESIS&quot;</span><span class="s1">: </span><span class="s3">r&quot;\(&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;RIGHT_PARENTHESIS&quot;</span><span class="s1">: </span><span class="s3">r&quot;\)&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;LEFT_BRACKET&quot;</span><span class="s1">: </span><span class="s3">r&quot;\[&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;RIGHT_BRACKET&quot;</span><span class="s1">: </span><span class="s3">r&quot;\]&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;SEMICOLON&quot;</span><span class="s1">: </span><span class="s3">r&quot;;&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;COMMA&quot;</span><span class="s1">: </span><span class="s3">r&quot;,&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;QUOTED_STRING&quot;</span><span class="s1">: re.compile(</span>
+        <span class="s3">r&quot;&quot;&quot; 
+            ( 
+                ('[^']*') 
+                | 
+                (&quot;[^&quot;]*&quot;) 
+            ) 
+        &quot;&quot;&quot;</span><span class="s0">,</span>
+        <span class="s1">re.VERBOSE</span><span class="s0">,</span>
+    <span class="s1">)</span><span class="s0">,</span>
+    <span class="s3">&quot;OP&quot;</span><span class="s1">: </span><span class="s3">r&quot;(===|==|~=|!=|&lt;=|&gt;=|&lt;|&gt;)&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;BOOLOP&quot;</span><span class="s1">: </span><span class="s3">r&quot;\b(or|and)\b&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;IN&quot;</span><span class="s1">: </span><span class="s3">r&quot;\bin\b&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;NOT&quot;</span><span class="s1">: </span><span class="s3">r&quot;\bnot\b&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;VARIABLE&quot;</span><span class="s1">: re.compile(</span>
+        <span class="s3">r&quot;&quot;&quot; 
+            \b( 
+                python_version 
+                |python_full_version 
+                |os[._]name 
+                |sys[._]platform 
+                |platform_(release|system) 
+                |platform[._](version|machine|python_implementation) 
+                |python_implementation 
+                |implementation_(name|version) 
+                |extra 
+            )\b 
+        &quot;&quot;&quot;</span><span class="s0">,</span>
+        <span class="s1">re.VERBOSE</span><span class="s0">,</span>
+    <span class="s1">)</span><span class="s0">,</span>
+    <span class="s3">&quot;SPECIFIER&quot;</span><span class="s1">: re.compile(</span>
+        <span class="s1">Specifier._operator_regex_str + Specifier._version_regex_str</span><span class="s0">,</span>
+        <span class="s1">re.VERBOSE | re.IGNORECASE</span><span class="s0">,</span>
+    <span class="s1">)</span><span class="s0">,</span>
+    <span class="s3">&quot;AT&quot;</span><span class="s1">: </span><span class="s3">r&quot;\@&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;URL&quot;</span><span class="s1">: </span><span class="s3">r&quot;[^ \t]+&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;IDENTIFIER&quot;</span><span class="s1">: </span><span class="s3">r&quot;\b[a-zA-Z0-9][a-zA-Z0-9._-]*\b&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;VERSION_PREFIX_TRAIL&quot;</span><span class="s1">: </span><span class="s3">r&quot;\.\*&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;VERSION_LOCAL_LABEL_TRAIL&quot;</span><span class="s1">: </span><span class="s3">r&quot;\+[a-z0-9]+(?:[-_\.][a-z0-9]+)*&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;WS&quot;</span><span class="s1">: </span><span class="s3">r&quot;[ \t]+&quot;</span><span class="s0">,</span>
+    <span class="s3">&quot;END&quot;</span><span class="s1">: </span><span class="s3">r&quot;$&quot;</span><span class="s0">,</span>
+<span class="s1">}</span>
+
+
+<span class="s0">class </span><span class="s1">Tokenizer:</span>
+    <span class="s2">&quot;&quot;&quot;Context-sensitive token parsing. 
+ 
+    Provides methods to examine the input stream to check whether the next token 
+    matches. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">source: str</span><span class="s0">,</span>
+        <span class="s1">*</span><span class="s0">,</span>
+        <span class="s1">rules: </span><span class="s3">&quot;Dict[str, Union[str, re.Pattern[str]]]&quot;</span><span class="s0">,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.source = source</span>
+        <span class="s1">self.rules: Dict[str</span><span class="s0">, </span><span class="s1">re.Pattern[str]] = {</span>
+            <span class="s1">name: re.compile(pattern) </span><span class="s0">for </span><span class="s1">name</span><span class="s0">, </span><span class="s1">pattern </span><span class="s0">in </span><span class="s1">rules.items()</span>
+        <span class="s1">}</span>
+        <span class="s1">self.next_token: Optional[Token] = </span><span class="s0">None</span>
+        <span class="s1">self.position = </span><span class="s4">0</span>
+
+    <span class="s0">def </span><span class="s1">consume(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s2">&quot;&quot;&quot;Move beyond provided token name, if at current position.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self.check(name):</span>
+            <span class="s1">self.read()</span>
+
+    <span class="s0">def </span><span class="s1">check(self</span><span class="s0">, </span><span class="s1">name: str</span><span class="s0">, </span><span class="s1">*</span><span class="s0">, </span><span class="s1">peek: bool = </span><span class="s0">False</span><span class="s1">) -&gt; bool:</span>
+        <span class="s2">&quot;&quot;&quot;Check whether the next token has the provided name. 
+ 
+        By default, if the check succeeds, the token *must* be read before 
+        another check. If `peek` is set to `True`, the token is not loaded and 
+        would need to be checked again. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">assert </span><span class="s1">(</span>
+            <span class="s1">self.next_token </span><span class="s0">is None</span>
+        <span class="s1">)</span><span class="s0">, </span><span class="s3">f&quot;Cannot check for </span><span class="s0">{</span><span class="s1">name</span><span class="s0">!r}</span><span class="s3">, already have </span><span class="s0">{</span><span class="s1">self.next_token</span><span class="s0">!r}</span><span class="s3">&quot;</span>
+        <span class="s0">assert </span><span class="s1">name </span><span class="s0">in </span><span class="s1">self.rules</span><span class="s0">, </span><span class="s3">f&quot;Unknown token name: </span><span class="s0">{</span><span class="s1">name</span><span class="s0">!r}</span><span class="s3">&quot;</span>
+
+        <span class="s1">expression = self.rules[name]</span>
+
+        <span class="s1">match = expression.match(self.source</span><span class="s0">, </span><span class="s1">self.position)</span>
+        <span class="s0">if </span><span class="s1">match </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return False</span>
+        <span class="s0">if not </span><span class="s1">peek:</span>
+            <span class="s1">self.next_token = Token(name</span><span class="s0">, </span><span class="s1">match[</span><span class="s4">0</span><span class="s1">]</span><span class="s0">, </span><span class="s1">self.position)</span>
+        <span class="s0">return True</span>
+
+    <span class="s0">def </span><span class="s1">expect(self</span><span class="s0">, </span><span class="s1">name: str</span><span class="s0">, </span><span class="s1">*</span><span class="s0">, </span><span class="s1">expected: str) -&gt; Token:</span>
+        <span class="s2">&quot;&quot;&quot;Expect a certain token name next, failing with a syntax error otherwise. 
+ 
+        The token is *not* read. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if not </span><span class="s1">self.check(name):</span>
+            <span class="s0">raise </span><span class="s1">self.raise_syntax_error(</span><span class="s3">f&quot;Expected </span><span class="s0">{</span><span class="s1">expected</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+        <span class="s0">return </span><span class="s1">self.read()</span>
+
+    <span class="s0">def </span><span class="s1">read(self) -&gt; Token:</span>
+        <span class="s2">&quot;&quot;&quot;Consume the next token and return it.&quot;&quot;&quot;</span>
+        <span class="s1">token = self.next_token</span>
+        <span class="s0">assert </span><span class="s1">token </span><span class="s0">is not None</span>
+
+        <span class="s1">self.position += len(token.text)</span>
+        <span class="s1">self.next_token = </span><span class="s0">None</span>
+
+        <span class="s0">return </span><span class="s1">token</span>
+
+    <span class="s0">def </span><span class="s1">raise_syntax_error(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">message: str</span><span class="s0">,</span>
+        <span class="s1">*</span><span class="s0">,</span>
+        <span class="s1">span_start: Optional[int] = </span><span class="s0">None,</span>
+        <span class="s1">span_end: Optional[int] = </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; NoReturn:</span>
+        <span class="s2">&quot;&quot;&quot;Raise ParserSyntaxError at the given position.&quot;&quot;&quot;</span>
+        <span class="s1">span = (</span>
+            <span class="s1">self.position </span><span class="s0">if </span><span class="s1">span_start </span><span class="s0">is None else </span><span class="s1">span_start</span><span class="s0">,</span>
+            <span class="s1">self.position </span><span class="s0">if </span><span class="s1">span_end </span><span class="s0">is None else </span><span class="s1">span_end</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s0">raise </span><span class="s1">ParserSyntaxError(</span>
+            <span class="s1">message</span><span class="s0">,</span>
+            <span class="s1">source=self.source</span><span class="s0">,</span>
+            <span class="s1">span=span</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">@contextlib.contextmanager</span>
+    <span class="s0">def </span><span class="s1">enclosing_tokens(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">open_token: str</span><span class="s0">, </span><span class="s1">close_token: str</span><span class="s0">, </span><span class="s1">*</span><span class="s0">, </span><span class="s1">around: str</span>
+    <span class="s1">) -&gt; Iterator[</span><span class="s0">None</span><span class="s1">]:</span>
+        <span class="s0">if </span><span class="s1">self.check(open_token):</span>
+            <span class="s1">open_position = self.position</span>
+            <span class="s1">self.read()</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">open_position = </span><span class="s0">None</span>
+
+        <span class="s0">yield</span>
+
+        <span class="s0">if </span><span class="s1">open_position </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return</span>
+
+        <span class="s0">if not </span><span class="s1">self.check(close_token):</span>
+            <span class="s1">self.raise_syntax_error(</span>
+                <span class="s3">f&quot;Expected matching </span><span class="s0">{</span><span class="s1">close_token</span><span class="s0">} </span><span class="s3">for </span><span class="s0">{</span><span class="s1">open_token</span><span class="s0">}</span><span class="s3">, after </span><span class="s0">{</span><span class="s1">around</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s0">,</span>
+                <span class="s1">span_start=open_position</span><span class="s0">,</span>
+            <span class="s1">)</span>
+
+        <span class="s1">self.read()</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<html>
+<head>
+<title>exceptions.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6897bb;}
+.s4 { color: #6a8759;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+exceptions.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">difflib</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+
+<span class="s0">from </span><span class="s1">..exceptions </span><span class="s0">import </span><span class="s1">BadRequest</span>
+<span class="s0">from </span><span class="s1">..exceptions </span><span class="s0">import </span><span class="s1">HTTPException</span>
+<span class="s0">from </span><span class="s1">..utils </span><span class="s0">import </span><span class="s1">cached_property</span>
+<span class="s0">from </span><span class="s1">..utils </span><span class="s0">import </span><span class="s1">redirect</span>
+
+<span class="s0">if </span><span class="s1">t.TYPE_CHECKING:</span>
+    <span class="s0">from </span><span class="s1">_typeshed.wsgi </span><span class="s0">import </span><span class="s1">WSGIEnvironment</span>
+    <span class="s0">from </span><span class="s1">.map </span><span class="s0">import </span><span class="s1">MapAdapter</span>
+    <span class="s0">from </span><span class="s1">.rules </span><span class="s0">import </span><span class="s1">Rule</span>
+    <span class="s0">from </span><span class="s1">..wrappers.request </span><span class="s0">import </span><span class="s1">Request</span>
+    <span class="s0">from </span><span class="s1">..wrappers.response </span><span class="s0">import </span><span class="s1">Response</span>
+
+
+<span class="s0">class </span><span class="s1">RoutingException(Exception):</span>
+    <span class="s2">&quot;&quot;&quot;Special exceptions that require the application to redirect, notifying 
+    about missing urls, etc. 
+ 
+    :internal: 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">RequestRedirect(HTTPException</span><span class="s0">, </span><span class="s1">RoutingException):</span>
+    <span class="s2">&quot;&quot;&quot;Raise if the map requests a redirect. This is for example the case if 
+    `strict_slashes` are activated and an url that requires a trailing slash. 
+ 
+    The attribute `new_url` contains the absolute destination url. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">code = </span><span class="s3">308</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">new_url: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__(new_url)</span>
+        <span class="s1">self.new_url = new_url</span>
+
+    <span class="s0">def </span><span class="s1">get_response(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">environ: WSGIEnvironment | Request | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">scope: dict | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; Response:</span>
+        <span class="s0">return </span><span class="s1">redirect(self.new_url</span><span class="s0">, </span><span class="s1">self.code)</span>
+
+
+<span class="s0">class </span><span class="s1">RequestPath(RoutingException):</span>
+    <span class="s2">&quot;&quot;&quot;Internal exception.&quot;&quot;&quot;</span>
+
+    <span class="s1">__slots__ = (</span><span class="s4">&quot;path_info&quot;</span><span class="s0">,</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">path_info: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__()</span>
+        <span class="s1">self.path_info = path_info</span>
+
+
+<span class="s0">class </span><span class="s1">RequestAliasRedirect(RoutingException):  </span><span class="s5"># noqa: B903</span>
+    <span class="s2">&quot;&quot;&quot;This rule is an alias and wants to redirect to the canonical URL.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">matched_values: t.Mapping[str</span><span class="s0">, </span><span class="s1">t.Any]</span><span class="s0">, </span><span class="s1">endpoint: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__()</span>
+        <span class="s1">self.matched_values = matched_values</span>
+        <span class="s1">self.endpoint = endpoint</span>
+
+
+<span class="s0">class </span><span class="s1">BuildError(RoutingException</span><span class="s0">, </span><span class="s1">LookupError):</span>
+    <span class="s2">&quot;&quot;&quot;Raised if the build system cannot find a URL for an endpoint with the 
+    values provided. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">endpoint: str</span><span class="s0">,</span>
+        <span class="s1">values: t.Mapping[str</span><span class="s0">, </span><span class="s1">t.Any]</span><span class="s0">,</span>
+        <span class="s1">method: str | </span><span class="s0">None,</span>
+        <span class="s1">adapter: MapAdapter | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__(endpoint</span><span class="s0">, </span><span class="s1">values</span><span class="s0">, </span><span class="s1">method)</span>
+        <span class="s1">self.endpoint = endpoint</span>
+        <span class="s1">self.values = values</span>
+        <span class="s1">self.method = method</span>
+        <span class="s1">self.adapter = adapter</span>
+
+    <span class="s1">@cached_property</span>
+    <span class="s0">def </span><span class="s1">suggested(self) -&gt; Rule | </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">self.closest_rule(self.adapter)</span>
+
+    <span class="s0">def </span><span class="s1">closest_rule(self</span><span class="s0">, </span><span class="s1">adapter: MapAdapter | </span><span class="s0">None</span><span class="s1">) -&gt; Rule | </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">def </span><span class="s1">_score_rule(rule: Rule) -&gt; float:</span>
+            <span class="s0">return </span><span class="s1">sum(</span>
+                <span class="s1">[</span>
+                    <span class="s3">0.98</span>
+                    <span class="s1">* difflib.SequenceMatcher(</span>
+                        <span class="s0">None, </span><span class="s1">rule.endpoint</span><span class="s0">, </span><span class="s1">self.endpoint</span>
+                    <span class="s1">).ratio()</span><span class="s0">,</span>
+                    <span class="s3">0.01 </span><span class="s1">* bool(set(self.values </span><span class="s0">or </span><span class="s1">()).issubset(rule.arguments))</span><span class="s0">,</span>
+                    <span class="s3">0.01 </span><span class="s1">* bool(rule.methods </span><span class="s0">and </span><span class="s1">self.method </span><span class="s0">in </span><span class="s1">rule.methods)</span><span class="s0">,</span>
+                <span class="s1">]</span>
+            <span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">adapter </span><span class="s0">and </span><span class="s1">adapter.map._rules:</span>
+            <span class="s0">return </span><span class="s1">max(adapter.map._rules</span><span class="s0">, </span><span class="s1">key=_score_rule)</span>
+
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self) -&gt; str:</span>
+        <span class="s1">message = [</span><span class="s4">f&quot;Could not build url for endpoint </span><span class="s0">{</span><span class="s1">self.endpoint</span><span class="s0">!r}</span><span class="s4">&quot;</span><span class="s1">]</span>
+        <span class="s0">if </span><span class="s1">self.method:</span>
+            <span class="s1">message.append(</span><span class="s4">f&quot; (</span><span class="s0">{</span><span class="s1">self.method</span><span class="s0">!r}</span><span class="s4">)&quot;</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">self.values:</span>
+            <span class="s1">message.append(</span><span class="s4">f&quot; with values </span><span class="s0">{</span><span class="s1">sorted(self.values)</span><span class="s0">!r}</span><span class="s4">&quot;</span><span class="s1">)</span>
+        <span class="s1">message.append(</span><span class="s4">&quot;.&quot;</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">self.suggested:</span>
+            <span class="s0">if </span><span class="s1">self.endpoint == self.suggested.endpoint:</span>
+                <span class="s0">if </span><span class="s1">(</span>
+                    <span class="s1">self.method</span>
+                    <span class="s0">and </span><span class="s1">self.suggested.methods </span><span class="s0">is not None</span>
+                    <span class="s0">and </span><span class="s1">self.method </span><span class="s0">not in </span><span class="s1">self.suggested.methods</span>
+                <span class="s1">):</span>
+                    <span class="s1">message.append(</span>
+                        <span class="s4">&quot; Did you mean to use methods&quot;</span>
+                        <span class="s4">f&quot; </span><span class="s0">{</span><span class="s1">sorted(self.suggested.methods)</span><span class="s0">!r}</span><span class="s4">?&quot;</span>
+                    <span class="s1">)</span>
+                <span class="s1">missing_values = self.suggested.arguments.union(</span>
+                    <span class="s1">set(self.suggested.defaults </span><span class="s0">or </span><span class="s1">())</span>
+                <span class="s1">) - set(self.values.keys())</span>
+                <span class="s0">if </span><span class="s1">missing_values:</span>
+                    <span class="s1">message.append(</span>
+                        <span class="s4">f&quot; Did you forget to specify values </span><span class="s0">{</span><span class="s1">sorted(missing_values)</span><span class="s0">!r}</span><span class="s4">?&quot;</span>
+                    <span class="s1">)</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">message.append(</span><span class="s4">f&quot; Did you mean </span><span class="s0">{</span><span class="s1">self.suggested.endpoint</span><span class="s0">!r} </span><span class="s4">instead?&quot;</span><span class="s1">)</span>
+        <span class="s0">return </span><span class="s4">&quot;&quot;</span><span class="s1">.join(message)</span>
+
+
+<span class="s0">class </span><span class="s1">WebsocketMismatch(BadRequest):</span>
+    <span class="s2">&quot;&quot;&quot;The only matched rule is either a WebSocket and the request is 
+    HTTP, or the rule is HTTP and the request is a WebSocket. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">NoMatch(Exception):</span>
+    <span class="s1">__slots__ = (</span><span class="s4">&quot;have_match_for&quot;</span><span class="s0">, </span><span class="s4">&quot;websocket_mismatch&quot;</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">have_match_for: set[str]</span><span class="s0">, </span><span class="s1">websocket_mismatch: bool) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.have_match_for = have_match_for</span>
+        <span class="s1">self.websocket_mismatch = websocket_mismatch</span>
+</pre>
+</body>
+</html>

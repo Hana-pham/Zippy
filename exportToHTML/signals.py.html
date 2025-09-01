@@ -1,0 +1,37 @@
+<html>
+<head>
+<title>signals.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+.s3 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+signals.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">blinker </span><span class="s0">import </span><span class="s1">Namespace</span>
+
+<span class="s2"># This namespace is only for signals provided by Flask itself.</span>
+<span class="s1">_signals = Namespace()</span>
+
+<span class="s1">template_rendered = _signals.signal(</span><span class="s3">&quot;template-rendered&quot;</span><span class="s1">)</span>
+<span class="s1">before_render_template = _signals.signal(</span><span class="s3">&quot;before-render-template&quot;</span><span class="s1">)</span>
+<span class="s1">request_started = _signals.signal(</span><span class="s3">&quot;request-started&quot;</span><span class="s1">)</span>
+<span class="s1">request_finished = _signals.signal(</span><span class="s3">&quot;request-finished&quot;</span><span class="s1">)</span>
+<span class="s1">request_tearing_down = _signals.signal(</span><span class="s3">&quot;request-tearing-down&quot;</span><span class="s1">)</span>
+<span class="s1">got_request_exception = _signals.signal(</span><span class="s3">&quot;got-request-exception&quot;</span><span class="s1">)</span>
+<span class="s1">appcontext_tearing_down = _signals.signal(</span><span class="s3">&quot;appcontext-tearing-down&quot;</span><span class="s1">)</span>
+<span class="s1">appcontext_pushed = _signals.signal(</span><span class="s3">&quot;appcontext-pushed&quot;</span><span class="s1">)</span>
+<span class="s1">appcontext_popped = _signals.signal(</span><span class="s3">&quot;appcontext-popped&quot;</span><span class="s1">)</span>
+<span class="s1">message_flashed = _signals.signal(</span><span class="s3">&quot;message-flashed&quot;</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

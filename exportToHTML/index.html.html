@@ -1,0 +1,44 @@
+<html>
+<head>
+<title>index.html</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #e8bf6a;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #bababa;}
+.s3 { color: #a5c261;}
+.s4 { color: #a9b7c6;}
+.s5 { color: #bababa;}
+.s6 { color: #6a8759;}
+.s7 { color: #cc7832;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+index.html</font>
+</center></td></tr></table>
+<pre><span class="s0">&lt;!DOCTYPE </span><span class="s2">html</span><span class="s0">&gt;</span>
+<span class="s0">&lt;html </span><span class="s2">lang</span><span class="s3">=&quot;en&quot;</span><span class="s0">&gt;</span>
+<span class="s0">&lt;head&gt;</span>
+    <span class="s0">&lt;meta </span><span class="s2">charset</span><span class="s3">=&quot;UTF-8&quot;</span><span class="s0">&gt;</span>
+    <span class="s0">&lt;link </span><span class="s2">rel</span><span class="s3">=&quot;stylesheet&quot; </span><span class="s2">href</span><span class="s3">=&quot;</span><span class="s4">{{ </span><span class="s5">url_for</span><span class="s4">(</span><span class="s6">'static'</span><span class="s4">, </span><span class="s5">filename</span><span class="s4">=</span><span class="s6">'index.css'</span><span class="s4">) }}</span><span class="s3">&quot;</span><span class="s0">&gt;</span>
+    <span class="s0">&lt;title&gt;</span><span class="s4">{{ </span><span class="s5">title </span><span class="s4">}}</span><span class="s0">&lt;/title&gt;</span>
+<span class="s0">&lt;/head&gt;</span>
+<span class="s0">&lt;body&gt;</span>
+    <span class="s0">&lt;h1&gt;</span><span class="s4">{{ </span><span class="s5">title </span><span class="s4">}}</span><span class="s0">&lt;/h1&gt;</span>
+    <span class="s0">&lt;div </span><span class="s2">class</span><span class="s3">=&quot;input-container&quot;</span><span class="s0">&gt;</span>
+        <span class="s0">&lt;form </span><span class="s2">id</span><span class="s3">=&quot;urlForm&quot; </span><span class="s2">onsubmit</span><span class="s3">=&quot;</span><span class="s1">submitForm()</span><span class="s7">;</span><span class="s3">&quot;</span><span class="s0">&gt;</span>
+            <span class="s0">&lt;input </span><span class="s2">type</span><span class="s3">=&quot;url&quot; </span><span class="s2">id</span><span class="s3">=&quot;inputUrl&quot; </span><span class="s2">name</span><span class="s3">=&quot;inputUrl&quot; </span><span class="s2">placeholder</span><span class="s3">=&quot;Type a Figma URL...&quot;</span>
+                   <span class="s2">pattern</span><span class="s3">=&quot;^https?://.*&quot; </span><span class="s2">required title</span><span class="s3">=&quot; URL example: https://.....&quot;</span><span class="s0">&gt;</span>
+        <span class="s0">&lt;/form&gt;</span>
+
+
+    <span class="s0">&lt;/div&gt;</span>
+     <span class="s0">&lt;p </span><span class="s2">id</span><span class="s3">=&quot;result&quot;</span><span class="s0">&gt;&lt;/p&gt;</span>
+    <span class="s0">&lt;script </span><span class="s2">src</span><span class="s3">=&quot;</span><span class="s4">{{ </span><span class="s5">url_for</span><span class="s4">(</span><span class="s6">'static'</span><span class="s4">, </span><span class="s5">filename</span><span class="s4">=</span><span class="s6">'indexJS.js'</span><span class="s4">) }}</span><span class="s3">&quot;</span><span class="s0">&gt;&lt;/script&gt;</span>
+<span class="s0">&lt;/body&gt;</span>
+<span class="s0">&lt;/html&gt;</span></pre>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<html>
+<head>
+<title>cache_control.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cache_control.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">ImmutableDictMixin</span>
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">UpdateDictMixin</span>
+
+
+<span class="s0">def </span><span class="s1">cache_control_property(key</span><span class="s0">, </span><span class="s1">empty</span><span class="s0">, </span><span class="s1">type):</span>
+    <span class="s2">&quot;&quot;&quot;Return a new property object for a cache header. Useful if you 
+    want to add support for a cache extension in a subclass. 
+ 
+    .. versionchanged:: 2.0 
+        Renamed from ``cache_property``. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">property(</span>
+        <span class="s0">lambda </span><span class="s1">x: x._get_cache_value(key</span><span class="s0">, </span><span class="s1">empty</span><span class="s0">, </span><span class="s1">type)</span><span class="s0">,</span>
+        <span class="s0">lambda </span><span class="s1">x</span><span class="s0">, </span><span class="s1">v: x._set_cache_value(key</span><span class="s0">, </span><span class="s1">v</span><span class="s0">, </span><span class="s1">type)</span><span class="s0">,</span>
+        <span class="s0">lambda </span><span class="s1">x: x._del_cache_value(key)</span><span class="s0">,</span>
+        <span class="s3">f&quot;accessor for </span><span class="s0">{</span><span class="s1">key</span><span class="s0">!r}</span><span class="s3">&quot;</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">_CacheControl(UpdateDictMixin</span><span class="s0">, </span><span class="s1">dict):</span>
+    <span class="s2">&quot;&quot;&quot;Subclass of a dict that stores values for a Cache-Control header.  It 
+    has accessors for all the cache-control directives specified in RFC 2616. 
+    The class does not differentiate between request and response directives. 
+ 
+    Because the cache-control directives in the HTTP header use dashes the 
+    python descriptors use underscores for that. 
+ 
+    To get a header of the :class:`CacheControl` object again you can convert 
+    the object into a string or call the :meth:`to_header` method.  If you plan 
+    to subclass it and add your own items have a look at the sourcecode for 
+    that class. 
+ 
+    .. versionchanged:: 2.1.0 
+        Setting int properties such as ``max_age`` will convert the 
+        value to an int. 
+ 
+    .. versionchanged:: 0.4 
+ 
+       Setting `no_cache` or `private` to boolean `True` will set the implicit 
+       none-value which is ``*``: 
+ 
+       &gt;&gt;&gt; cc = ResponseCacheControl() 
+       &gt;&gt;&gt; cc.no_cache = True 
+       &gt;&gt;&gt; cc 
+       &lt;ResponseCacheControl 'no-cache'&gt; 
+       &gt;&gt;&gt; cc.no_cache 
+       '*' 
+       &gt;&gt;&gt; cc.no_cache = None 
+       &gt;&gt;&gt; cc 
+       &lt;ResponseCacheControl ''&gt; 
+ 
+       In versions before 0.5 the behavior documented here affected the now 
+       no longer existing `CacheControl` class. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">no_cache = cache_control_property(</span><span class="s3">&quot;no-cache&quot;</span><span class="s0">, </span><span class="s3">&quot;*&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+    <span class="s1">no_store = cache_control_property(</span><span class="s3">&quot;no-store&quot;</span><span class="s0">, None, </span><span class="s1">bool)</span>
+    <span class="s1">max_age = cache_control_property(</span><span class="s3">&quot;max-age&quot;</span><span class="s0">, </span><span class="s1">-</span><span class="s4">1</span><span class="s0">, </span><span class="s1">int)</span>
+    <span class="s1">no_transform = cache_control_property(</span><span class="s3">&quot;no-transform&quot;</span><span class="s0">, None, None</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">values=()</span><span class="s0">, </span><span class="s1">on_update=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">dict.__init__(self</span><span class="s0">, </span><span class="s1">values </span><span class="s0">or </span><span class="s1">())</span>
+        <span class="s1">self.on_update = on_update</span>
+        <span class="s1">self.provided = values </span><span class="s0">is not None</span>
+
+    <span class="s0">def </span><span class="s1">_get_cache_value(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">empty</span><span class="s0">, </span><span class="s1">type):</span>
+        <span class="s2">&quot;&quot;&quot;Used internally by the accessor properties.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">type </span><span class="s0">is </span><span class="s1">bool:</span>
+            <span class="s0">return </span><span class="s1">key </span><span class="s0">in </span><span class="s1">self</span>
+        <span class="s0">if </span><span class="s1">key </span><span class="s0">in </span><span class="s1">self:</span>
+            <span class="s1">value = self[key]</span>
+            <span class="s0">if </span><span class="s1">value </span><span class="s0">is None</span><span class="s1">:</span>
+                <span class="s0">return </span><span class="s1">empty</span>
+            <span class="s0">elif </span><span class="s1">type </span><span class="s0">is not None</span><span class="s1">:</span>
+                <span class="s0">try</span><span class="s1">:</span>
+                    <span class="s1">value = type(value)</span>
+                <span class="s0">except </span><span class="s1">ValueError:</span>
+                    <span class="s0">pass</span>
+            <span class="s0">return </span><span class="s1">value</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">_set_cache_value(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value</span><span class="s0">, </span><span class="s1">type):</span>
+        <span class="s2">&quot;&quot;&quot;Used internally by the accessor properties.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">type </span><span class="s0">is </span><span class="s1">bool:</span>
+            <span class="s0">if </span><span class="s1">value:</span>
+                <span class="s1">self[key] = </span><span class="s0">None</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">self.pop(key</span><span class="s0">, None</span><span class="s1">)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s0">if </span><span class="s1">value </span><span class="s0">is None</span><span class="s1">:</span>
+                <span class="s1">self.pop(key</span><span class="s0">, None</span><span class="s1">)</span>
+            <span class="s0">elif </span><span class="s1">value </span><span class="s0">is True</span><span class="s1">:</span>
+                <span class="s1">self[key] = </span><span class="s0">None</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s0">if </span><span class="s1">type </span><span class="s0">is not None</span><span class="s1">:</span>
+                    <span class="s1">self[key] = type(value)</span>
+                <span class="s0">else</span><span class="s1">:</span>
+                    <span class="s1">self[key] = value</span>
+
+    <span class="s0">def </span><span class="s1">_del_cache_value(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s2">&quot;&quot;&quot;Used internally by the accessor properties.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">key </span><span class="s0">in </span><span class="s1">self:</span>
+            <span class="s0">del </span><span class="s1">self[key]</span>
+
+    <span class="s0">def </span><span class="s1">to_header(self):</span>
+        <span class="s2">&quot;&quot;&quot;Convert the stored values into a cache control header.&quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">http.dump_header(self)</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self):</span>
+        <span class="s0">return </span><span class="s1">self.to_header()</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self):</span>
+        <span class="s1">kv_str = </span><span class="s3">&quot; &quot;</span><span class="s1">.join(</span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">k</span><span class="s0">}</span><span class="s3">=</span><span class="s0">{</span><span class="s1">v</span><span class="s0">!r}</span><span class="s3">&quot; </span><span class="s0">for </span><span class="s1">k</span><span class="s0">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">sorted(self.items()))</span>
+        <span class="s0">return </span><span class="s3">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">kv_str</span><span class="s0">}</span><span class="s3">&gt;&quot;</span>
+
+    <span class="s1">cache_property = staticmethod(cache_control_property)</span>
+
+
+<span class="s0">class </span><span class="s1">RequestCacheControl(ImmutableDictMixin</span><span class="s0">, </span><span class="s1">_CacheControl):</span>
+    <span class="s2">&quot;&quot;&quot;A cache control for requests.  This is immutable and gives access 
+    to all the request-relevant cache control headers. 
+ 
+    To get a header of the :class:`RequestCacheControl` object again you can 
+    convert the object into a string or call the :meth:`to_header` method.  If 
+    you plan to subclass it and add your own items have a look at the sourcecode 
+    for that class. 
+ 
+    .. versionchanged:: 2.1.0 
+        Setting int properties such as ``max_age`` will convert the 
+        value to an int. 
+ 
+    .. versionadded:: 0.5 
+       In previous versions a `CacheControl` class existed that was used 
+       both for request and response. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">max_stale = cache_control_property(</span><span class="s3">&quot;max-stale&quot;</span><span class="s0">, </span><span class="s3">&quot;*&quot;</span><span class="s0">, </span><span class="s1">int)</span>
+    <span class="s1">min_fresh = cache_control_property(</span><span class="s3">&quot;min-fresh&quot;</span><span class="s0">, </span><span class="s3">&quot;*&quot;</span><span class="s0">, </span><span class="s1">int)</span>
+    <span class="s1">only_if_cached = cache_control_property(</span><span class="s3">&quot;only-if-cached&quot;</span><span class="s0">, None, </span><span class="s1">bool)</span>
+
+
+<span class="s0">class </span><span class="s1">ResponseCacheControl(_CacheControl):</span>
+    <span class="s2">&quot;&quot;&quot;A cache control for responses.  Unlike :class:`RequestCacheControl` 
+    this is mutable and gives access to response-relevant cache control 
+    headers. 
+ 
+    To get a header of the :class:`ResponseCacheControl` object again you can 
+    convert the object into a string or call the :meth:`to_header` method.  If 
+    you plan to subclass it and add your own items have a look at the sourcecode 
+    for that class. 
+ 
+    .. versionchanged:: 2.1.1 
+        ``s_maxage`` converts the value to an int. 
+ 
+    .. versionchanged:: 2.1.0 
+        Setting int properties such as ``max_age`` will convert the 
+        value to an int. 
+ 
+    .. versionadded:: 0.5 
+       In previous versions a `CacheControl` class existed that was used 
+       both for request and response. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">public = cache_control_property(</span><span class="s3">&quot;public&quot;</span><span class="s0">, None, </span><span class="s1">bool)</span>
+    <span class="s1">private = cache_control_property(</span><span class="s3">&quot;private&quot;</span><span class="s0">, </span><span class="s3">&quot;*&quot;</span><span class="s0">, None</span><span class="s1">)</span>
+    <span class="s1">must_revalidate = cache_control_property(</span><span class="s3">&quot;must-revalidate&quot;</span><span class="s0">, None, </span><span class="s1">bool)</span>
+    <span class="s1">proxy_revalidate = cache_control_property(</span><span class="s3">&quot;proxy-revalidate&quot;</span><span class="s0">, None, </span><span class="s1">bool)</span>
+    <span class="s1">s_maxage = cache_control_property(</span><span class="s3">&quot;s-maxage&quot;</span><span class="s0">, None, </span><span class="s1">int)</span>
+    <span class="s1">immutable = cache_control_property(</span><span class="s3">&quot;immutable&quot;</span><span class="s0">, None, </span><span class="s1">bool)</span>
+
+
+<span class="s5"># circular dependencies</span>
+<span class="s0">from </span><span class="s1">.. </span><span class="s0">import </span><span class="s1">http</span>
+</pre>
+</body>
+</html>

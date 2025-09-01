@@ -1,0 +1,128 @@
+<html>
+<head>
+<title>cache_control.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+cache_control.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Callable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Mapping</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">TypeVar</span>
+
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">ImmutableDictMixin</span>
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">UpdateDictMixin</span>
+
+<span class="s1">T = TypeVar(</span><span class="s2">&quot;T&quot;</span><span class="s1">)</span>
+<span class="s1">_CPT = TypeVar(</span><span class="s2">&quot;_CPT&quot;</span><span class="s0">, </span><span class="s1">str</span><span class="s0">, </span><span class="s1">int</span><span class="s0">, </span><span class="s1">bool)</span>
+<span class="s1">_OptCPT = _CPT | </span><span class="s0">None</span>
+
+<span class="s0">def </span><span class="s1">cache_control_property(key: str</span><span class="s0">, </span><span class="s1">empty: _OptCPT</span><span class="s0">, </span><span class="s1">type: type[_CPT]) -&gt; property: ...</span>
+
+<span class="s0">class </span><span class="s1">_CacheControl(UpdateDictMixin[str</span><span class="s0">, </span><span class="s1">_OptCPT]</span><span class="s0">, </span><span class="s1">dict[str</span><span class="s0">, </span><span class="s1">_OptCPT]):</span>
+    <span class="s1">provided: bool</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">values: Mapping[str</span><span class="s0">, </span><span class="s1">_OptCPT] | Iterable[tuple[str</span><span class="s0">, </span><span class="s1">_OptCPT]] = ()</span><span class="s0">,</span>
+        <span class="s1">on_update: Callable[[_CacheControl]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">no_cache(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@no_cache.setter</span>
+    <span class="s0">def </span><span class="s1">no_cache(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@no_cache.deleter</span>
+    <span class="s0">def </span><span class="s1">no_cache(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">no_store(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@no_store.setter</span>
+    <span class="s0">def </span><span class="s1">no_store(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@no_store.deleter</span>
+    <span class="s0">def </span><span class="s1">no_store(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">max_age(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@max_age.setter</span>
+    <span class="s0">def </span><span class="s1">max_age(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@max_age.deleter</span>
+    <span class="s0">def </span><span class="s1">max_age(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">no_transform(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@no_transform.setter</span>
+    <span class="s0">def </span><span class="s1">no_transform(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@no_transform.deleter</span>
+    <span class="s0">def </span><span class="s1">no_transform(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_get_cache_value(self</span><span class="s0">, </span><span class="s1">key: str</span><span class="s0">, </span><span class="s1">empty: T | </span><span class="s0">None, </span><span class="s1">type: type[T]) -&gt; T: ...</span>
+    <span class="s0">def </span><span class="s1">_set_cache_value(self</span><span class="s0">, </span><span class="s1">key: str</span><span class="s0">, </span><span class="s1">value: T | </span><span class="s0">None, </span><span class="s1">type: type[T]) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_del_cache_value(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+    <span class="s1">@staticmethod</span>
+    <span class="s0">def </span><span class="s1">cache_property(key: str</span><span class="s0">, </span><span class="s1">empty: _OptCPT</span><span class="s0">, </span><span class="s1">type: type[_CPT]) -&gt; property: ...</span>
+
+<span class="s0">class </span><span class="s1">RequestCacheControl(ImmutableDictMixin[str</span><span class="s0">, </span><span class="s1">_OptCPT]</span><span class="s0">, </span><span class="s1">_CacheControl):</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">max_stale(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@max_stale.setter</span>
+    <span class="s0">def </span><span class="s1">max_stale(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@max_stale.deleter</span>
+    <span class="s0">def </span><span class="s1">max_stale(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">min_fresh(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@min_fresh.setter</span>
+    <span class="s0">def </span><span class="s1">min_fresh(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@min_fresh.deleter</span>
+    <span class="s0">def </span><span class="s1">min_fresh(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">only_if_cached(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@only_if_cached.setter</span>
+    <span class="s0">def </span><span class="s1">only_if_cached(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@only_if_cached.deleter</span>
+    <span class="s0">def </span><span class="s1">only_if_cached(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+
+<span class="s0">class </span><span class="s1">ResponseCacheControl(_CacheControl):</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">public(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@public.setter</span>
+    <span class="s0">def </span><span class="s1">public(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@public.deleter</span>
+    <span class="s0">def </span><span class="s1">public(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">private(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@private.setter</span>
+    <span class="s0">def </span><span class="s1">private(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@private.deleter</span>
+    <span class="s0">def </span><span class="s1">private(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">must_revalidate(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@must_revalidate.setter</span>
+    <span class="s0">def </span><span class="s1">must_revalidate(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@must_revalidate.deleter</span>
+    <span class="s0">def </span><span class="s1">must_revalidate(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">proxy_revalidate(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@proxy_revalidate.setter</span>
+    <span class="s0">def </span><span class="s1">proxy_revalidate(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@proxy_revalidate.deleter</span>
+    <span class="s0">def </span><span class="s1">proxy_revalidate(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">s_maxage(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@s_maxage.setter</span>
+    <span class="s0">def </span><span class="s1">s_maxage(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@s_maxage.deleter</span>
+    <span class="s0">def </span><span class="s1">s_maxage(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">immutable(self) -&gt; bool | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@immutable.setter</span>
+    <span class="s0">def </span><span class="s1">immutable(self</span><span class="s0">, </span><span class="s1">value: bool | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@immutable.deleter</span>
+    <span class="s0">def </span><span class="s1">immutable(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+</pre>
+</body>
+</html>

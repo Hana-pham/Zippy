@@ -1,0 +1,76 @@
+<html>
+<head>
+<title>range.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+range.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Callable</span>
+<span class="s0">from </span><span class="s1">datetime </span><span class="s0">import </span><span class="s1">datetime</span>
+
+<span class="s0">class </span><span class="s1">IfRange:</span>
+    <span class="s1">etag: str | </span><span class="s0">None</span>
+    <span class="s1">date: datetime | </span><span class="s0">None</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">etag: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None, </span><span class="s1">date: datetime | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+
+<span class="s0">class </span><span class="s1">Range:</span>
+    <span class="s1">units: str</span>
+    <span class="s1">ranges: list[tuple[int</span><span class="s0">, </span><span class="s1">int | </span><span class="s0">None</span><span class="s1">]]</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">units: str</span><span class="s0">, </span><span class="s1">ranges: list[tuple[int</span><span class="s0">, </span><span class="s1">int | </span><span class="s0">None</span><span class="s1">]]) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">range_for_length(self</span><span class="s0">, </span><span class="s1">length: int | </span><span class="s0">None</span><span class="s1">) -&gt; tuple[int</span><span class="s0">, </span><span class="s1">int] | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">make_content_range(self</span><span class="s0">, </span><span class="s1">length: int | </span><span class="s0">None</span><span class="s1">) -&gt; ContentRange | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+    <span class="s0">def </span><span class="s1">to_content_range_header(self</span><span class="s0">, </span><span class="s1">length: int | </span><span class="s0">None</span><span class="s1">) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+
+<span class="s0">def </span><span class="s1">_callback_property(name: str) -&gt; property: ...</span>
+
+<span class="s0">class </span><span class="s1">ContentRange:</span>
+    <span class="s1">on_update: Callable[[ContentRange]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">units: str | </span><span class="s0">None,</span>
+        <span class="s1">start: int | </span><span class="s0">None,</span>
+        <span class="s1">stop: int | </span><span class="s0">None,</span>
+        <span class="s1">length: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">on_update: Callable[[ContentRange]</span><span class="s0">, None</span><span class="s1">] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">units(self) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@units.setter</span>
+    <span class="s0">def </span><span class="s1">units(self</span><span class="s0">, </span><span class="s1">value: str | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">start(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@start.setter</span>
+    <span class="s0">def </span><span class="s1">start(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">stop(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@stop.setter</span>
+    <span class="s0">def </span><span class="s1">stop(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">length(self) -&gt; int | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@length.setter</span>
+    <span class="s0">def </span><span class="s1">length(self</span><span class="s0">, </span><span class="s1">value: int | </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">set(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">start: int | </span><span class="s0">None,</span>
+        <span class="s1">stop: int | </span><span class="s0">None,</span>
+        <span class="s1">length: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">units: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s2">&quot;bytes&quot;</span><span class="s0">,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">unset(self) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+</pre>
+</body>
+</html>

@@ -1,0 +1,695 @@
+<html>
+<head>
+<title>arbiter.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #6897bb;}
+.s5 { color: #6a8759;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+arbiter.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+<span class="s2">import </span><span class="s1">errno</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">random</span>
+<span class="s2">import </span><span class="s1">select</span>
+<span class="s2">import </span><span class="s1">signal</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">time</span>
+<span class="s2">import </span><span class="s1">traceback</span>
+
+<span class="s2">from </span><span class="s1">gunicorn.errors </span><span class="s2">import </span><span class="s1">HaltServer</span><span class="s2">, </span><span class="s1">AppImportError</span>
+<span class="s2">from </span><span class="s1">gunicorn.pidfile </span><span class="s2">import </span><span class="s1">Pidfile</span>
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">sock</span><span class="s2">, </span><span class="s1">systemd</span><span class="s2">, </span><span class="s1">util</span>
+
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">__version__</span><span class="s2">, </span><span class="s1">SERVER_SOFTWARE</span>
+
+
+<span class="s2">class </span><span class="s1">Arbiter(object):</span>
+    <span class="s3">&quot;&quot;&quot; 
+    Arbiter maintain the workers processes alive. It launches or 
+    kills them if needed. It also manages application reloading 
+    via SIGHUP/USR2. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0"># A flag indicating if a worker failed to</span>
+    <span class="s0"># to boot. If a worker process exist with</span>
+    <span class="s0"># this error code, the arbiter will terminate.</span>
+    <span class="s1">WORKER_BOOT_ERROR = </span><span class="s4">3</span>
+
+    <span class="s0"># A flag indicating if an application failed to be loaded</span>
+    <span class="s1">APP_LOAD_ERROR = </span><span class="s4">4</span>
+
+    <span class="s1">START_CTX = {}</span>
+
+    <span class="s1">LISTENERS = []</span>
+    <span class="s1">WORKERS = {}</span>
+    <span class="s1">PIPE = []</span>
+
+    <span class="s0"># I love dynamic languages</span>
+    <span class="s1">SIG_QUEUE = []</span>
+    <span class="s1">SIGNALS = [getattr(signal</span><span class="s2">, </span><span class="s5">&quot;SIG%s&quot; </span><span class="s1">% x)</span>
+               <span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s5">&quot;HUP QUIT INT TERM TTIN TTOU USR1 USR2 WINCH&quot;</span><span class="s1">.split()]</span>
+    <span class="s1">SIG_NAMES = dict(</span>
+        <span class="s1">(getattr(signal</span><span class="s2">, </span><span class="s1">name)</span><span class="s2">, </span><span class="s1">name[</span><span class="s4">3</span><span class="s1">:].lower()) </span><span class="s2">for </span><span class="s1">name </span><span class="s2">in </span><span class="s1">dir(signal)</span>
+        <span class="s2">if </span><span class="s1">name[:</span><span class="s4">3</span><span class="s1">] == </span><span class="s5">&quot;SIG&quot; </span><span class="s2">and </span><span class="s1">name[</span><span class="s4">3</span><span class="s1">] != </span><span class="s5">&quot;_&quot;</span>
+    <span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">app):</span>
+        <span class="s1">os.environ[</span><span class="s5">&quot;SERVER_SOFTWARE&quot;</span><span class="s1">] = SERVER_SOFTWARE</span>
+
+        <span class="s1">self._num_workers = </span><span class="s2">None</span>
+        <span class="s1">self._last_logged_active_worker_count = </span><span class="s2">None</span>
+        <span class="s1">self.log = </span><span class="s2">None</span>
+
+        <span class="s1">self.setup(app)</span>
+
+        <span class="s1">self.pidfile = </span><span class="s2">None</span>
+        <span class="s1">self.systemd = </span><span class="s2">False</span>
+        <span class="s1">self.worker_age = </span><span class="s4">0</span>
+        <span class="s1">self.reexec_pid = </span><span class="s4">0</span>
+        <span class="s1">self.master_pid = </span><span class="s4">0</span>
+        <span class="s1">self.master_name = </span><span class="s5">&quot;Master&quot;</span>
+
+        <span class="s1">cwd = util.getcwd()</span>
+
+        <span class="s1">args = sys.argv[:]</span>
+        <span class="s1">args.insert(</span><span class="s4">0</span><span class="s2">, </span><span class="s1">sys.executable)</span>
+
+        <span class="s0"># init start context</span>
+        <span class="s1">self.START_CTX = {</span>
+            <span class="s5">&quot;args&quot;</span><span class="s1">: args</span><span class="s2">,</span>
+            <span class="s5">&quot;cwd&quot;</span><span class="s1">: cwd</span><span class="s2">,</span>
+            <span class="s4">0</span><span class="s1">: sys.executable</span>
+        <span class="s1">}</span>
+
+    <span class="s2">def </span><span class="s1">_get_num_workers(self):</span>
+        <span class="s2">return </span><span class="s1">self._num_workers</span>
+
+    <span class="s2">def </span><span class="s1">_set_num_workers(self</span><span class="s2">, </span><span class="s1">value):</span>
+        <span class="s1">old_value = self._num_workers</span>
+        <span class="s1">self._num_workers = value</span>
+        <span class="s1">self.cfg.nworkers_changed(self</span><span class="s2">, </span><span class="s1">value</span><span class="s2">, </span><span class="s1">old_value)</span>
+    <span class="s1">num_workers = property(_get_num_workers</span><span class="s2">, </span><span class="s1">_set_num_workers)</span>
+
+    <span class="s2">def </span><span class="s1">setup(self</span><span class="s2">, </span><span class="s1">app):</span>
+        <span class="s1">self.app = app</span>
+        <span class="s1">self.cfg = app.cfg</span>
+
+        <span class="s2">if </span><span class="s1">self.log </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s1">self.log = self.cfg.logger_class(app.cfg)</span>
+
+        <span class="s0"># reopen files</span>
+        <span class="s2">if </span><span class="s5">'GUNICORN_FD' </span><span class="s2">in </span><span class="s1">os.environ:</span>
+            <span class="s1">self.log.reopen_files()</span>
+
+        <span class="s1">self.worker_class = self.cfg.worker_class</span>
+        <span class="s1">self.address = self.cfg.address</span>
+        <span class="s1">self.num_workers = self.cfg.workers</span>
+        <span class="s1">self.timeout = self.cfg.timeout</span>
+        <span class="s1">self.proc_name = self.cfg.proc_name</span>
+
+        <span class="s1">self.log.debug(</span><span class="s5">'Current configuration:</span><span class="s2">\n</span><span class="s5">{0}'</span><span class="s1">.format(</span>
+            <span class="s5">'</span><span class="s2">\n</span><span class="s5">'</span><span class="s1">.join(</span>
+                <span class="s5">'  {0}: {1}'</span><span class="s1">.format(config</span><span class="s2">, </span><span class="s1">value.value)</span>
+                <span class="s2">for </span><span class="s1">config</span><span class="s2">, </span><span class="s1">value</span>
+                <span class="s2">in </span><span class="s1">sorted(self.cfg.settings.items()</span><span class="s2">,</span>
+                          <span class="s1">key=</span><span class="s2">lambda </span><span class="s1">setting: setting[</span><span class="s4">1</span><span class="s1">]))))</span>
+
+        <span class="s0"># set enviroment' variables</span>
+        <span class="s2">if </span><span class="s1">self.cfg.env:</span>
+            <span class="s2">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">self.cfg.env.items():</span>
+                <span class="s1">os.environ[k] = v</span>
+
+        <span class="s2">if </span><span class="s1">self.cfg.preload_app:</span>
+            <span class="s1">self.app.wsgi()</span>
+
+    <span class="s2">def </span><span class="s1">start(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Initialize the arbiter. Start listening and set pidfile if needed. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.log.info(</span><span class="s5">&quot;Starting gunicorn %s&quot;</span><span class="s2">, </span><span class="s1">__version__)</span>
+
+        <span class="s2">if </span><span class="s5">'GUNICORN_PID' </span><span class="s2">in </span><span class="s1">os.environ:</span>
+            <span class="s1">self.master_pid = int(os.environ.get(</span><span class="s5">'GUNICORN_PID'</span><span class="s1">))</span>
+            <span class="s1">self.proc_name = self.proc_name + </span><span class="s5">&quot;.2&quot;</span>
+            <span class="s1">self.master_name = </span><span class="s5">&quot;Master.2&quot;</span>
+
+        <span class="s1">self.pid = os.getpid()</span>
+        <span class="s2">if </span><span class="s1">self.cfg.pidfile </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">pidname = self.cfg.pidfile</span>
+            <span class="s2">if </span><span class="s1">self.master_pid != </span><span class="s4">0</span><span class="s1">:</span>
+                <span class="s1">pidname += </span><span class="s5">&quot;.2&quot;</span>
+            <span class="s1">self.pidfile = Pidfile(pidname)</span>
+            <span class="s1">self.pidfile.create(self.pid)</span>
+        <span class="s1">self.cfg.on_starting(self)</span>
+
+        <span class="s1">self.init_signals()</span>
+
+        <span class="s2">if not </span><span class="s1">self.LISTENERS:</span>
+            <span class="s1">fds = </span><span class="s2">None</span>
+            <span class="s1">listen_fds = systemd.listen_fds()</span>
+            <span class="s2">if </span><span class="s1">listen_fds:</span>
+                <span class="s1">self.systemd = </span><span class="s2">True</span>
+                <span class="s1">fds = range(systemd.SD_LISTEN_FDS_START</span><span class="s2">,</span>
+                            <span class="s1">systemd.SD_LISTEN_FDS_START + listen_fds)</span>
+
+            <span class="s2">elif </span><span class="s1">self.master_pid:</span>
+                <span class="s1">fds = []</span>
+                <span class="s2">for </span><span class="s1">fd </span><span class="s2">in </span><span class="s1">os.environ.pop(</span><span class="s5">'GUNICORN_FD'</span><span class="s1">).split(</span><span class="s5">','</span><span class="s1">):</span>
+                    <span class="s1">fds.append(int(fd))</span>
+
+            <span class="s1">self.LISTENERS = sock.create_sockets(self.cfg</span><span class="s2">, </span><span class="s1">self.log</span><span class="s2">, </span><span class="s1">fds)</span>
+
+        <span class="s1">listeners_str = </span><span class="s5">&quot;,&quot;</span><span class="s1">.join([str(lnr) </span><span class="s2">for </span><span class="s1">lnr </span><span class="s2">in </span><span class="s1">self.LISTENERS])</span>
+        <span class="s1">self.log.debug(</span><span class="s5">&quot;Arbiter booted&quot;</span><span class="s1">)</span>
+        <span class="s1">self.log.info(</span><span class="s5">&quot;Listening at: %s (%s)&quot;</span><span class="s2">, </span><span class="s1">listeners_str</span><span class="s2">, </span><span class="s1">self.pid)</span>
+        <span class="s1">self.log.info(</span><span class="s5">&quot;Using worker: %s&quot;</span><span class="s2">, </span><span class="s1">self.cfg.worker_class_str)</span>
+        <span class="s1">systemd.sd_notify(</span><span class="s5">&quot;READY=1</span><span class="s2">\n</span><span class="s5">STATUS=Gunicorn arbiter booted&quot;</span><span class="s2">, </span><span class="s1">self.log)</span>
+
+        <span class="s0"># check worker class requirements</span>
+        <span class="s2">if </span><span class="s1">hasattr(self.worker_class</span><span class="s2">, </span><span class="s5">&quot;check_config&quot;</span><span class="s1">):</span>
+            <span class="s1">self.worker_class.check_config(self.cfg</span><span class="s2">, </span><span class="s1">self.log)</span>
+
+        <span class="s1">self.cfg.when_ready(self)</span>
+
+    <span class="s2">def </span><span class="s1">init_signals(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Initialize master signal handling. Most of the signals 
+        are queued. Child signals only wake up the master. 
+        &quot;&quot;&quot;</span>
+        <span class="s0"># close old PIPE</span>
+        <span class="s2">for </span><span class="s1">p </span><span class="s2">in </span><span class="s1">self.PIPE:</span>
+            <span class="s1">os.close(p)</span>
+
+        <span class="s0"># initialize the pipe</span>
+        <span class="s1">self.PIPE = pair = os.pipe()</span>
+        <span class="s2">for </span><span class="s1">p </span><span class="s2">in </span><span class="s1">pair:</span>
+            <span class="s1">util.set_non_blocking(p)</span>
+            <span class="s1">util.close_on_exec(p)</span>
+
+        <span class="s1">self.log.close_on_exec()</span>
+
+        <span class="s0"># initialize all signals</span>
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.SIGNALS:</span>
+            <span class="s1">signal.signal(s</span><span class="s2">, </span><span class="s1">self.signal)</span>
+        <span class="s1">signal.signal(signal.SIGCHLD</span><span class="s2">, </span><span class="s1">self.handle_chld)</span>
+
+    <span class="s2">def </span><span class="s1">signal(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s2">if </span><span class="s1">len(self.SIG_QUEUE) &lt; </span><span class="s4">5</span><span class="s1">:</span>
+            <span class="s1">self.SIG_QUEUE.append(sig)</span>
+            <span class="s1">self.wakeup()</span>
+
+    <span class="s2">def </span><span class="s1">run(self):</span>
+        <span class="s3">&quot;Main master loop.&quot;</span>
+        <span class="s1">self.start()</span>
+        <span class="s1">util._setproctitle(</span><span class="s5">&quot;master [%s]&quot; </span><span class="s1">% self.proc_name)</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">self.manage_workers()</span>
+
+            <span class="s2">while True</span><span class="s1">:</span>
+                <span class="s1">self.maybe_promote_master()</span>
+
+                <span class="s1">sig = self.SIG_QUEUE.pop(</span><span class="s4">0</span><span class="s1">) </span><span class="s2">if </span><span class="s1">self.SIG_QUEUE </span><span class="s2">else None</span>
+                <span class="s2">if </span><span class="s1">sig </span><span class="s2">is None</span><span class="s1">:</span>
+                    <span class="s1">self.sleep()</span>
+                    <span class="s1">self.murder_workers()</span>
+                    <span class="s1">self.manage_workers()</span>
+                    <span class="s2">continue</span>
+
+                <span class="s2">if </span><span class="s1">sig </span><span class="s2">not in </span><span class="s1">self.SIG_NAMES:</span>
+                    <span class="s1">self.log.info(</span><span class="s5">&quot;Ignoring unknown signal: %s&quot;</span><span class="s2">, </span><span class="s1">sig)</span>
+                    <span class="s2">continue</span>
+
+                <span class="s1">signame = self.SIG_NAMES.get(sig)</span>
+                <span class="s1">handler = getattr(self</span><span class="s2">, </span><span class="s5">&quot;handle_%s&quot; </span><span class="s1">% signame</span><span class="s2">, None</span><span class="s1">)</span>
+                <span class="s2">if not </span><span class="s1">handler:</span>
+                    <span class="s1">self.log.error(</span><span class="s5">&quot;Unhandled signal: %s&quot;</span><span class="s2">, </span><span class="s1">signame)</span>
+                    <span class="s2">continue</span>
+                <span class="s1">self.log.info(</span><span class="s5">&quot;Handling signal: %s&quot;</span><span class="s2">, </span><span class="s1">signame)</span>
+                <span class="s1">handler()</span>
+                <span class="s1">self.wakeup()</span>
+        <span class="s2">except </span><span class="s1">(StopIteration</span><span class="s2">, </span><span class="s1">KeyboardInterrupt):</span>
+            <span class="s1">self.halt()</span>
+        <span class="s2">except </span><span class="s1">HaltServer </span><span class="s2">as </span><span class="s1">inst:</span>
+            <span class="s1">self.halt(reason=inst.reason</span><span class="s2">, </span><span class="s1">exit_status=inst.exit_status)</span>
+        <span class="s2">except </span><span class="s1">SystemExit:</span>
+            <span class="s2">raise</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s1">self.log.error(</span><span class="s5">&quot;Unhandled exception in main loop&quot;</span><span class="s2">,</span>
+                           <span class="s1">exc_info=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s1">self.stop(</span><span class="s2">False</span><span class="s1">)</span>
+            <span class="s2">if </span><span class="s1">self.pidfile </span><span class="s2">is not None</span><span class="s1">:</span>
+                <span class="s1">self.pidfile.unlink()</span>
+            <span class="s1">sys.exit(-</span><span class="s4">1</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">handle_chld(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s3">&quot;SIGCHLD handling&quot;</span>
+        <span class="s1">self.reap_workers()</span>
+        <span class="s1">self.wakeup()</span>
+
+    <span class="s2">def </span><span class="s1">handle_hup(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        HUP handling. 
+        - Reload configuration 
+        - Start the new worker processes with a new configuration 
+        - Gracefully shutdown the old worker processes 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.log.info(</span><span class="s5">&quot;Hang up: %s&quot;</span><span class="s2">, </span><span class="s1">self.master_name)</span>
+        <span class="s1">self.reload()</span>
+
+    <span class="s2">def </span><span class="s1">handle_term(self):</span>
+        <span class="s3">&quot;SIGTERM handling&quot;</span>
+        <span class="s2">raise </span><span class="s1">StopIteration</span>
+
+    <span class="s2">def </span><span class="s1">handle_int(self):</span>
+        <span class="s3">&quot;SIGINT handling&quot;</span>
+        <span class="s1">self.stop(</span><span class="s2">False</span><span class="s1">)</span>
+        <span class="s2">raise </span><span class="s1">StopIteration</span>
+
+    <span class="s2">def </span><span class="s1">handle_quit(self):</span>
+        <span class="s3">&quot;SIGQUIT handling&quot;</span>
+        <span class="s1">self.stop(</span><span class="s2">False</span><span class="s1">)</span>
+        <span class="s2">raise </span><span class="s1">StopIteration</span>
+
+    <span class="s2">def </span><span class="s1">handle_ttin(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        SIGTTIN handling. 
+        Increases the number of workers by one. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.num_workers += </span><span class="s4">1</span>
+        <span class="s1">self.manage_workers()</span>
+
+    <span class="s2">def </span><span class="s1">handle_ttou(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        SIGTTOU handling. 
+        Decreases the number of workers by one. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self.num_workers &lt;= </span><span class="s4">1</span><span class="s1">:</span>
+            <span class="s2">return</span>
+        <span class="s1">self.num_workers -= </span><span class="s4">1</span>
+        <span class="s1">self.manage_workers()</span>
+
+    <span class="s2">def </span><span class="s1">handle_usr1(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        SIGUSR1 handling. 
+        Kill all workers by sending them a SIGUSR1 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.log.reopen_files()</span>
+        <span class="s1">self.kill_workers(signal.SIGUSR1)</span>
+
+    <span class="s2">def </span><span class="s1">handle_usr2(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        SIGUSR2 handling. 
+        Creates a new arbiter/worker set as a fork of the current 
+        arbiter without affecting old workers. Use this to do live 
+        deployment with the ability to backout a change. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.reexec()</span>
+
+    <span class="s2">def </span><span class="s1">handle_winch(self):</span>
+        <span class="s3">&quot;&quot;&quot;SIGWINCH handling&quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self.cfg.daemon:</span>
+            <span class="s1">self.log.info(</span><span class="s5">&quot;graceful stop of workers&quot;</span><span class="s1">)</span>
+            <span class="s1">self.num_workers = </span><span class="s4">0</span>
+            <span class="s1">self.kill_workers(signal.SIGTERM)</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">self.log.debug(</span><span class="s5">&quot;SIGWINCH ignored. Not daemonized&quot;</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">maybe_promote_master(self):</span>
+        <span class="s2">if </span><span class="s1">self.master_pid == </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return</span>
+
+        <span class="s2">if </span><span class="s1">self.master_pid != os.getppid():</span>
+            <span class="s1">self.log.info(</span><span class="s5">&quot;Master has been promoted.&quot;</span><span class="s1">)</span>
+            <span class="s0"># reset master infos</span>
+            <span class="s1">self.master_name = </span><span class="s5">&quot;Master&quot;</span>
+            <span class="s1">self.master_pid = </span><span class="s4">0</span>
+            <span class="s1">self.proc_name = self.cfg.proc_name</span>
+            <span class="s2">del </span><span class="s1">os.environ[</span><span class="s5">'GUNICORN_PID'</span><span class="s1">]</span>
+            <span class="s0"># rename the pidfile</span>
+            <span class="s2">if </span><span class="s1">self.pidfile </span><span class="s2">is not None</span><span class="s1">:</span>
+                <span class="s1">self.pidfile.rename(self.cfg.pidfile)</span>
+            <span class="s0"># reset proctitle</span>
+            <span class="s1">util._setproctitle(</span><span class="s5">&quot;master [%s]&quot; </span><span class="s1">% self.proc_name)</span>
+
+    <span class="s2">def </span><span class="s1">wakeup(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Wake up the arbiter by writing to the PIPE 
+        &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">os.write(self.PIPE[</span><span class="s4">1</span><span class="s1">]</span><span class="s2">, </span><span class="s6">b'.'</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">IOError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">e.errno </span><span class="s2">not in </span><span class="s1">[errno.EAGAIN</span><span class="s2">, </span><span class="s1">errno.EINTR]:</span>
+                <span class="s2">raise</span>
+
+    <span class="s2">def </span><span class="s1">halt(self</span><span class="s2">, </span><span class="s1">reason=</span><span class="s2">None, </span><span class="s1">exit_status=</span><span class="s4">0</span><span class="s1">):</span>
+        <span class="s3">&quot;&quot;&quot; halt arbiter &quot;&quot;&quot;</span>
+        <span class="s1">self.stop()</span>
+
+        <span class="s1">log_func = self.log.info </span><span class="s2">if </span><span class="s1">exit_status == </span><span class="s4">0 </span><span class="s2">else </span><span class="s1">self.log.error</span>
+        <span class="s1">log_func(</span><span class="s5">&quot;Shutting down: %s&quot;</span><span class="s2">, </span><span class="s1">self.master_name)</span>
+        <span class="s2">if </span><span class="s1">reason </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">log_func(</span><span class="s5">&quot;Reason: %s&quot;</span><span class="s2">, </span><span class="s1">reason)</span>
+
+        <span class="s2">if </span><span class="s1">self.pidfile </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">self.pidfile.unlink()</span>
+        <span class="s1">self.cfg.on_exit(self)</span>
+        <span class="s1">sys.exit(exit_status)</span>
+
+    <span class="s2">def </span><span class="s1">sleep(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Sleep until PIPE is readable or we timeout. 
+        A readable PIPE means a signal occurred. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">ready = select.select([self.PIPE[</span><span class="s4">0</span><span class="s1">]]</span><span class="s2">, </span><span class="s1">[]</span><span class="s2">, </span><span class="s1">[]</span><span class="s2">, </span><span class="s4">1.0</span><span class="s1">)</span>
+            <span class="s2">if not </span><span class="s1">ready[</span><span class="s4">0</span><span class="s1">]:</span>
+                <span class="s2">return</span>
+            <span class="s2">while </span><span class="s1">os.read(self.PIPE[</span><span class="s4">0</span><span class="s1">]</span><span class="s2">, </span><span class="s4">1</span><span class="s1">):</span>
+                <span class="s2">pass</span>
+        <span class="s2">except </span><span class="s1">(select.error</span><span class="s2">, </span><span class="s1">OSError) </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s0"># TODO: select.error is a subclass of OSError since Python 3.3.</span>
+            <span class="s1">error_number = getattr(e</span><span class="s2">, </span><span class="s5">'errno'</span><span class="s2">, </span><span class="s1">e.args[</span><span class="s4">0</span><span class="s1">])</span>
+            <span class="s2">if </span><span class="s1">error_number </span><span class="s2">not in </span><span class="s1">[errno.EAGAIN</span><span class="s2">, </span><span class="s1">errno.EINTR]:</span>
+                <span class="s2">raise</span>
+        <span class="s2">except </span><span class="s1">KeyboardInterrupt:</span>
+            <span class="s1">sys.exit()</span>
+
+    <span class="s2">def </span><span class="s1">stop(self</span><span class="s2">, </span><span class="s1">graceful=</span><span class="s2">True</span><span class="s1">):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Stop workers 
+ 
+        :attr graceful: boolean, If True (the default) workers will be 
+        killed gracefully  (ie. trying to wait for the current connection) 
+        &quot;&quot;&quot;</span>
+        <span class="s1">unlink = (</span>
+            <span class="s1">self.reexec_pid == self.master_pid == </span><span class="s4">0</span>
+            <span class="s2">and not </span><span class="s1">self.systemd</span>
+            <span class="s2">and not </span><span class="s1">self.cfg.reuse_port</span>
+        <span class="s1">)</span>
+        <span class="s1">sock.close_sockets(self.LISTENERS</span><span class="s2">, </span><span class="s1">unlink)</span>
+
+        <span class="s1">self.LISTENERS = []</span>
+        <span class="s1">sig = signal.SIGTERM</span>
+        <span class="s2">if not </span><span class="s1">graceful:</span>
+            <span class="s1">sig = signal.SIGQUIT</span>
+        <span class="s1">limit = time.time() + self.cfg.graceful_timeout</span>
+        <span class="s0"># instruct the workers to exit</span>
+        <span class="s1">self.kill_workers(sig)</span>
+        <span class="s0"># wait until the graceful timeout</span>
+        <span class="s2">while </span><span class="s1">self.WORKERS </span><span class="s2">and </span><span class="s1">time.time() &lt; limit:</span>
+            <span class="s1">time.sleep(</span><span class="s4">0.1</span><span class="s1">)</span>
+
+        <span class="s1">self.kill_workers(signal.SIGKILL)</span>
+
+    <span class="s2">def </span><span class="s1">reexec(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Relaunch the master and workers. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">self.reexec_pid != </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">self.log.warning(</span><span class="s5">&quot;USR2 signal ignored. Child exists.&quot;</span><span class="s1">)</span>
+            <span class="s2">return</span>
+
+        <span class="s2">if </span><span class="s1">self.master_pid != </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">self.log.warning(</span><span class="s5">&quot;USR2 signal ignored. Parent exists.&quot;</span><span class="s1">)</span>
+            <span class="s2">return</span>
+
+        <span class="s1">master_pid = os.getpid()</span>
+        <span class="s1">self.reexec_pid = os.fork()</span>
+        <span class="s2">if </span><span class="s1">self.reexec_pid != </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">return</span>
+
+        <span class="s1">self.cfg.pre_exec(self)</span>
+
+        <span class="s1">environ = self.cfg.env_orig.copy()</span>
+        <span class="s1">environ[</span><span class="s5">'GUNICORN_PID'</span><span class="s1">] = str(master_pid)</span>
+
+        <span class="s2">if </span><span class="s1">self.systemd:</span>
+            <span class="s1">environ[</span><span class="s5">'LISTEN_PID'</span><span class="s1">] = str(os.getpid())</span>
+            <span class="s1">environ[</span><span class="s5">'LISTEN_FDS'</span><span class="s1">] = str(len(self.LISTENERS))</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">environ[</span><span class="s5">'GUNICORN_FD'</span><span class="s1">] = </span><span class="s5">','</span><span class="s1">.join(</span>
+                <span class="s1">str(lnr.fileno()) </span><span class="s2">for </span><span class="s1">lnr </span><span class="s2">in </span><span class="s1">self.LISTENERS)</span>
+
+        <span class="s1">os.chdir(self.START_CTX[</span><span class="s5">'cwd'</span><span class="s1">])</span>
+
+        <span class="s0"># exec the process using the original environment</span>
+        <span class="s1">os.execvpe(self.START_CTX[</span><span class="s4">0</span><span class="s1">]</span><span class="s2">, </span><span class="s1">self.START_CTX[</span><span class="s5">'args'</span><span class="s1">]</span><span class="s2">, </span><span class="s1">environ)</span>
+
+    <span class="s2">def </span><span class="s1">reload(self):</span>
+        <span class="s1">old_address = self.cfg.address</span>
+
+        <span class="s0"># reset old environment</span>
+        <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">self.cfg.env:</span>
+            <span class="s2">if </span><span class="s1">k </span><span class="s2">in </span><span class="s1">self.cfg.env_orig:</span>
+                <span class="s0"># reset the key to the value it had before</span>
+                <span class="s0"># we launched gunicorn</span>
+                <span class="s1">os.environ[k] = self.cfg.env_orig[k]</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s0"># delete the value set by gunicorn</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s2">del </span><span class="s1">os.environ[k]</span>
+                <span class="s2">except </span><span class="s1">KeyError:</span>
+                    <span class="s2">pass</span>
+
+        <span class="s0"># reload conf</span>
+        <span class="s1">self.app.reload()</span>
+        <span class="s1">self.setup(self.app)</span>
+
+        <span class="s0"># reopen log files</span>
+        <span class="s1">self.log.reopen_files()</span>
+
+        <span class="s0"># do we need to change listener ?</span>
+        <span class="s2">if </span><span class="s1">old_address != self.cfg.address:</span>
+            <span class="s0"># close all listeners</span>
+            <span class="s2">for </span><span class="s1">lnr </span><span class="s2">in </span><span class="s1">self.LISTENERS:</span>
+                <span class="s1">lnr.close()</span>
+            <span class="s0"># init new listeners</span>
+            <span class="s1">self.LISTENERS = sock.create_sockets(self.cfg</span><span class="s2">, </span><span class="s1">self.log)</span>
+            <span class="s1">listeners_str = </span><span class="s5">&quot;,&quot;</span><span class="s1">.join([str(lnr) </span><span class="s2">for </span><span class="s1">lnr </span><span class="s2">in </span><span class="s1">self.LISTENERS])</span>
+            <span class="s1">self.log.info(</span><span class="s5">&quot;Listening at: %s&quot;</span><span class="s2">, </span><span class="s1">listeners_str)</span>
+
+        <span class="s0"># do some actions on reload</span>
+        <span class="s1">self.cfg.on_reload(self)</span>
+
+        <span class="s0"># unlink pidfile</span>
+        <span class="s2">if </span><span class="s1">self.pidfile </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">self.pidfile.unlink()</span>
+
+        <span class="s0"># create new pidfile</span>
+        <span class="s2">if </span><span class="s1">self.cfg.pidfile </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">self.pidfile = Pidfile(self.cfg.pidfile)</span>
+            <span class="s1">self.pidfile.create(self.pid)</span>
+
+        <span class="s0"># set new proc_name</span>
+        <span class="s1">util._setproctitle(</span><span class="s5">&quot;master [%s]&quot; </span><span class="s1">% self.proc_name)</span>
+
+        <span class="s0"># spawn new workers</span>
+        <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">range(self.cfg.workers):</span>
+            <span class="s1">self.spawn_worker()</span>
+
+        <span class="s0"># manage workers</span>
+        <span class="s1">self.manage_workers()</span>
+
+    <span class="s2">def </span><span class="s1">murder_workers(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Kill unused/idle workers 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if not </span><span class="s1">self.timeout:</span>
+            <span class="s2">return</span>
+        <span class="s1">workers = list(self.WORKERS.items())</span>
+        <span class="s2">for </span><span class="s1">(pid</span><span class="s2">, </span><span class="s1">worker) </span><span class="s2">in </span><span class="s1">workers:</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s2">if </span><span class="s1">time.time() - worker.tmp.last_update() &lt;= self.timeout:</span>
+                    <span class="s2">continue</span>
+            <span class="s2">except </span><span class="s1">(OSError</span><span class="s2">, </span><span class="s1">ValueError):</span>
+                <span class="s2">continue</span>
+
+            <span class="s2">if not </span><span class="s1">worker.aborted:</span>
+                <span class="s1">self.log.critical(</span><span class="s5">&quot;WORKER TIMEOUT (pid:%s)&quot;</span><span class="s2">, </span><span class="s1">pid)</span>
+                <span class="s1">worker.aborted = </span><span class="s2">True</span>
+                <span class="s1">self.kill_worker(pid</span><span class="s2">, </span><span class="s1">signal.SIGABRT)</span>
+            <span class="s2">else</span><span class="s1">:</span>
+                <span class="s1">self.kill_worker(pid</span><span class="s2">, </span><span class="s1">signal.SIGKILL)</span>
+
+    <span class="s2">def </span><span class="s1">reap_workers(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Reap workers to avoid zombie processes 
+        &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s2">while True</span><span class="s1">:</span>
+                <span class="s1">wpid</span><span class="s2">, </span><span class="s1">status = os.waitpid(-</span><span class="s4">1</span><span class="s2">, </span><span class="s1">os.WNOHANG)</span>
+                <span class="s2">if not </span><span class="s1">wpid:</span>
+                    <span class="s2">break</span>
+                <span class="s2">if </span><span class="s1">self.reexec_pid == wpid:</span>
+                    <span class="s1">self.reexec_pid = </span><span class="s4">0</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s0"># A worker was terminated. If the termination reason was</span>
+                    <span class="s0"># that it could not boot, we'll shut it down to avoid</span>
+                    <span class="s0"># infinite start/stop cycles.</span>
+                    <span class="s1">exitcode = status &gt;&gt; </span><span class="s4">8</span>
+                    <span class="s2">if </span><span class="s1">exitcode != </span><span class="s4">0</span><span class="s1">:</span>
+                        <span class="s1">self.log.error(</span><span class="s5">'Worker (pid:%s) exited with code %s'</span><span class="s2">, </span><span class="s1">wpid</span><span class="s2">, </span><span class="s1">exitcode)</span>
+                    <span class="s2">if </span><span class="s1">exitcode == self.WORKER_BOOT_ERROR:</span>
+                        <span class="s1">reason = </span><span class="s5">&quot;Worker failed to boot.&quot;</span>
+                        <span class="s2">raise </span><span class="s1">HaltServer(reason</span><span class="s2">, </span><span class="s1">self.WORKER_BOOT_ERROR)</span>
+                    <span class="s2">if </span><span class="s1">exitcode == self.APP_LOAD_ERROR:</span>
+                        <span class="s1">reason = </span><span class="s5">&quot;App failed to load.&quot;</span>
+                        <span class="s2">raise </span><span class="s1">HaltServer(reason</span><span class="s2">, </span><span class="s1">self.APP_LOAD_ERROR)</span>
+
+                    <span class="s2">if </span><span class="s1">exitcode &gt; </span><span class="s4">0</span><span class="s1">:</span>
+                        <span class="s0"># If the exit code of the worker is greater than 0,</span>
+                        <span class="s0"># let the user know.</span>
+                        <span class="s1">self.log.error(</span><span class="s5">&quot;Worker (pid:%s) exited with code %s.&quot;</span><span class="s2">,</span>
+                                       <span class="s1">wpid</span><span class="s2">, </span><span class="s1">exitcode)</span>
+                    <span class="s2">elif </span><span class="s1">status &gt; </span><span class="s4">0</span><span class="s1">:</span>
+                        <span class="s0"># If the exit code of the worker is 0 and the status</span>
+                        <span class="s0"># is greater than 0, then it was most likely killed</span>
+                        <span class="s0"># via a signal.</span>
+                        <span class="s2">try</span><span class="s1">:</span>
+                            <span class="s1">sig_name = signal.Signals(status).name</span>
+                        <span class="s2">except </span><span class="s1">ValueError:</span>
+                            <span class="s1">sig_name = </span><span class="s5">&quot;code {}&quot;</span><span class="s1">.format(status)</span>
+                        <span class="s1">msg = </span><span class="s5">&quot;Worker (pid:{}) was sent {}!&quot;</span><span class="s1">.format(</span>
+                            <span class="s1">wpid</span><span class="s2">, </span><span class="s1">sig_name)</span>
+
+                        <span class="s0"># Additional hint for SIGKILL</span>
+                        <span class="s2">if </span><span class="s1">status == signal.SIGKILL:</span>
+                            <span class="s1">msg += </span><span class="s5">&quot; Perhaps out of memory?&quot;</span>
+                        <span class="s1">self.log.error(msg)</span>
+
+                    <span class="s1">worker = self.WORKERS.pop(wpid</span><span class="s2">, None</span><span class="s1">)</span>
+                    <span class="s2">if not </span><span class="s1">worker:</span>
+                        <span class="s2">continue</span>
+                    <span class="s1">worker.tmp.close()</span>
+                    <span class="s1">self.cfg.child_exit(self</span><span class="s2">, </span><span class="s1">worker)</span>
+        <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">e.errno != errno.ECHILD:</span>
+                <span class="s2">raise</span>
+
+    <span class="s2">def </span><span class="s1">manage_workers(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Maintain the number of workers by spawning or killing 
+        as required. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">if </span><span class="s1">len(self.WORKERS) &lt; self.num_workers:</span>
+            <span class="s1">self.spawn_workers()</span>
+
+        <span class="s1">workers = self.WORKERS.items()</span>
+        <span class="s1">workers = sorted(workers</span><span class="s2">, </span><span class="s1">key=</span><span class="s2">lambda </span><span class="s1">w: w[</span><span class="s4">1</span><span class="s1">].age)</span>
+        <span class="s2">while </span><span class="s1">len(workers) &gt; self.num_workers:</span>
+            <span class="s1">(pid</span><span class="s2">, </span><span class="s1">_) = workers.pop(</span><span class="s4">0</span><span class="s1">)</span>
+            <span class="s1">self.kill_worker(pid</span><span class="s2">, </span><span class="s1">signal.SIGTERM)</span>
+
+        <span class="s1">active_worker_count = len(workers)</span>
+        <span class="s2">if </span><span class="s1">self._last_logged_active_worker_count != active_worker_count:</span>
+            <span class="s1">self._last_logged_active_worker_count = active_worker_count</span>
+            <span class="s1">self.log.debug(</span><span class="s5">&quot;{0} workers&quot;</span><span class="s1">.format(active_worker_count)</span><span class="s2">,</span>
+                           <span class="s1">extra={</span><span class="s5">&quot;metric&quot;</span><span class="s1">: </span><span class="s5">&quot;gunicorn.workers&quot;</span><span class="s2">,</span>
+                                  <span class="s5">&quot;value&quot;</span><span class="s1">: active_worker_count</span><span class="s2">,</span>
+                                  <span class="s5">&quot;mtype&quot;</span><span class="s1">: </span><span class="s5">&quot;gauge&quot;</span><span class="s1">})</span>
+
+    <span class="s2">def </span><span class="s1">spawn_worker(self):</span>
+        <span class="s1">self.worker_age += </span><span class="s4">1</span>
+        <span class="s1">worker = self.worker_class(self.worker_age</span><span class="s2">, </span><span class="s1">self.pid</span><span class="s2">, </span><span class="s1">self.LISTENERS</span><span class="s2">,</span>
+                                   <span class="s1">self.app</span><span class="s2">, </span><span class="s1">self.timeout / </span><span class="s4">2.0</span><span class="s2">,</span>
+                                   <span class="s1">self.cfg</span><span class="s2">, </span><span class="s1">self.log)</span>
+        <span class="s1">self.cfg.pre_fork(self</span><span class="s2">, </span><span class="s1">worker)</span>
+        <span class="s1">pid = os.fork()</span>
+        <span class="s2">if </span><span class="s1">pid != </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s1">worker.pid = pid</span>
+            <span class="s1">self.WORKERS[pid] = worker</span>
+            <span class="s2">return </span><span class="s1">pid</span>
+
+        <span class="s0"># Do not inherit the temporary files of other workers</span>
+        <span class="s2">for </span><span class="s1">sibling </span><span class="s2">in </span><span class="s1">self.WORKERS.values():</span>
+            <span class="s1">sibling.tmp.close()</span>
+
+        <span class="s0"># Process Child</span>
+        <span class="s1">worker.pid = os.getpid()</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">util._setproctitle(</span><span class="s5">&quot;worker [%s]&quot; </span><span class="s1">% self.proc_name)</span>
+            <span class="s1">self.log.info(</span><span class="s5">&quot;Booting worker with pid: %s&quot;</span><span class="s2">, </span><span class="s1">worker.pid)</span>
+            <span class="s1">self.cfg.post_fork(self</span><span class="s2">, </span><span class="s1">worker)</span>
+            <span class="s1">worker.init_process()</span>
+            <span class="s1">sys.exit(</span><span class="s4">0</span><span class="s1">)</span>
+        <span class="s2">except </span><span class="s1">SystemExit:</span>
+            <span class="s2">raise</span>
+        <span class="s2">except </span><span class="s1">AppImportError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s1">self.log.debug(</span><span class="s5">&quot;Exception while loading the application&quot;</span><span class="s2">,</span>
+                           <span class="s1">exc_info=</span><span class="s2">True</span><span class="s1">)</span>
+            <span class="s1">print(</span><span class="s5">&quot;%s&quot; </span><span class="s1">% e</span><span class="s2">, </span><span class="s1">file=sys.stderr)</span>
+            <span class="s1">sys.stderr.flush()</span>
+            <span class="s1">sys.exit(self.APP_LOAD_ERROR)</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s1">self.log.exception(</span><span class="s5">&quot;Exception in worker process&quot;</span><span class="s1">)</span>
+            <span class="s2">if not </span><span class="s1">worker.booted:</span>
+                <span class="s1">sys.exit(self.WORKER_BOOT_ERROR)</span>
+            <span class="s1">sys.exit(-</span><span class="s4">1</span><span class="s1">)</span>
+        <span class="s2">finally</span><span class="s1">:</span>
+            <span class="s1">self.log.info(</span><span class="s5">&quot;Worker exiting (pid: %s)&quot;</span><span class="s2">, </span><span class="s1">worker.pid)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">worker.tmp.close()</span>
+                <span class="s1">self.cfg.worker_exit(self</span><span class="s2">, </span><span class="s1">worker)</span>
+            <span class="s2">except </span><span class="s1">Exception:</span>
+                <span class="s1">self.log.warning(</span><span class="s5">&quot;Exception during worker exit:</span><span class="s2">\n</span><span class="s5">%s&quot;</span><span class="s2">,</span>
+                                 <span class="s1">traceback.format_exc())</span>
+
+    <span class="s2">def </span><span class="s1">spawn_workers(self):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Spawn new workers as needed. 
+ 
+        This is where a worker process leaves the main loop 
+        of the master process. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s2">for </span><span class="s1">_ </span><span class="s2">in </span><span class="s1">range(self.num_workers - len(self.WORKERS)):</span>
+            <span class="s1">self.spawn_worker()</span>
+            <span class="s1">time.sleep(</span><span class="s4">0.1 </span><span class="s1">* random.random())</span>
+
+    <span class="s2">def </span><span class="s1">kill_workers(self</span><span class="s2">, </span><span class="s1">sig):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Kill all workers with the signal `sig` 
+        :attr sig: `signal.SIG*` value 
+        &quot;&quot;&quot;</span>
+        <span class="s1">worker_pids = list(self.WORKERS.keys())</span>
+        <span class="s2">for </span><span class="s1">pid </span><span class="s2">in </span><span class="s1">worker_pids:</span>
+            <span class="s1">self.kill_worker(pid</span><span class="s2">, </span><span class="s1">sig)</span>
+
+    <span class="s2">def </span><span class="s1">kill_worker(self</span><span class="s2">, </span><span class="s1">pid</span><span class="s2">, </span><span class="s1">sig):</span>
+        <span class="s3">&quot;&quot;&quot;\ 
+        Kill a worker 
+ 
+        :attr pid: int, worker pid 
+        :attr sig: `signal.SIG*` value 
+         &quot;&quot;&quot;</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">os.kill(pid</span><span class="s2">, </span><span class="s1">sig)</span>
+        <span class="s2">except </span><span class="s1">OSError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if </span><span class="s1">e.errno == errno.ESRCH:</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s1">worker = self.WORKERS.pop(pid)</span>
+                    <span class="s1">worker.tmp.close()</span>
+                    <span class="s1">self.cfg.worker_exit(self</span><span class="s2">, </span><span class="s1">worker)</span>
+                    <span class="s2">return</span>
+                <span class="s2">except </span><span class="s1">(KeyError</span><span class="s2">, </span><span class="s1">OSError):</span>
+                    <span class="s2">return</span>
+            <span class="s2">raise</span>
+</pre>
+</body>
+</html>

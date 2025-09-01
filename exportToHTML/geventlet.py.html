@@ -1,0 +1,209 @@
+<html>
+<head>
+<title>geventlet.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #629755; font-style: italic;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+geventlet.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">from </span><span class="s1">functools </span><span class="s2">import </span><span class="s1">partial</span>
+<span class="s2">import </span><span class="s1">sys</span>
+
+<span class="s2">try</span><span class="s1">:</span>
+    <span class="s2">import </span><span class="s1">eventlet</span>
+<span class="s2">except </span><span class="s1">ImportError:</span>
+    <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;eventlet worker requires eventlet 0.24.1 or higher&quot;</span><span class="s1">)</span>
+<span class="s2">else</span><span class="s1">:</span>
+    <span class="s2">from </span><span class="s1">packaging.version </span><span class="s2">import </span><span class="s1">parse </span><span class="s2">as </span><span class="s1">parse_version</span>
+    <span class="s2">if </span><span class="s1">parse_version(eventlet.__version__) &lt; parse_version(</span><span class="s3">'0.24.1'</span><span class="s1">):</span>
+        <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;eventlet worker requires eventlet 0.24.1 or higher&quot;</span><span class="s1">)</span>
+
+<span class="s2">from </span><span class="s1">eventlet </span><span class="s2">import </span><span class="s1">hubs</span><span class="s2">, </span><span class="s1">greenthread</span>
+<span class="s2">from </span><span class="s1">eventlet.greenio </span><span class="s2">import </span><span class="s1">GreenSocket</span>
+<span class="s2">import </span><span class="s1">eventlet.wsgi</span>
+<span class="s2">import </span><span class="s1">greenlet</span>
+
+<span class="s2">from </span><span class="s1">gunicorn.workers.base_async </span><span class="s2">import </span><span class="s1">AsyncWorker</span>
+<span class="s2">from </span><span class="s1">gunicorn.sock </span><span class="s2">import </span><span class="s1">ssl_wrap_socket</span>
+
+<span class="s0"># ALREADY_HANDLED is removed in 0.30.3+ now it's `WSGI_LOCAL.already_handled: bool`</span>
+<span class="s0"># https://github.com/eventlet/eventlet/pull/544</span>
+<span class="s1">EVENTLET_WSGI_LOCAL = getattr(eventlet.wsgi</span><span class="s2">, </span><span class="s3">&quot;WSGI_LOCAL&quot;</span><span class="s2">, None</span><span class="s1">)</span>
+<span class="s1">EVENTLET_ALREADY_HANDLED = getattr(eventlet.wsgi</span><span class="s2">, </span><span class="s3">&quot;ALREADY_HANDLED&quot;</span><span class="s2">, None</span><span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">_eventlet_socket_sendfile(self</span><span class="s2">, </span><span class="s1">file</span><span class="s2">, </span><span class="s1">offset=</span><span class="s4">0</span><span class="s2">, </span><span class="s1">count=</span><span class="s2">None</span><span class="s1">):</span>
+    <span class="s0"># Based on the implementation in gevent which in turn is slightly</span>
+    <span class="s0"># modified from the standard library implementation.</span>
+    <span class="s2">if </span><span class="s1">self.gettimeout() == </span><span class="s4">0</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;non-blocking sockets are not supported&quot;</span><span class="s1">)</span>
+    <span class="s2">if </span><span class="s1">offset:</span>
+        <span class="s1">file.seek(offset)</span>
+    <span class="s1">blocksize = min(count</span><span class="s2">, </span><span class="s4">8192</span><span class="s1">) </span><span class="s2">if </span><span class="s1">count </span><span class="s2">else </span><span class="s4">8192</span>
+    <span class="s1">total_sent = </span><span class="s4">0</span>
+    <span class="s0"># localize variable access to minimize overhead</span>
+    <span class="s1">file_read = file.read</span>
+    <span class="s1">sock_send = self.send</span>
+    <span class="s2">try</span><span class="s1">:</span>
+        <span class="s2">while True</span><span class="s1">:</span>
+            <span class="s2">if </span><span class="s1">count:</span>
+                <span class="s1">blocksize = min(count - total_sent</span><span class="s2">, </span><span class="s1">blocksize)</span>
+                <span class="s2">if </span><span class="s1">blocksize &lt;= </span><span class="s4">0</span><span class="s1">:</span>
+                    <span class="s2">break</span>
+            <span class="s1">data = memoryview(file_read(blocksize))</span>
+            <span class="s2">if not </span><span class="s1">data:</span>
+                <span class="s2">break  </span><span class="s0"># EOF</span>
+            <span class="s2">while True</span><span class="s1">:</span>
+                <span class="s2">try</span><span class="s1">:</span>
+                    <span class="s1">sent = sock_send(data)</span>
+                <span class="s2">except </span><span class="s1">BlockingIOError:</span>
+                    <span class="s2">continue</span>
+                <span class="s2">else</span><span class="s1">:</span>
+                    <span class="s1">total_sent += sent</span>
+                    <span class="s2">if </span><span class="s1">sent &lt; len(data):</span>
+                        <span class="s1">data = data[sent:]</span>
+                    <span class="s2">else</span><span class="s1">:</span>
+                        <span class="s2">break</span>
+        <span class="s2">return </span><span class="s1">total_sent</span>
+    <span class="s2">finally</span><span class="s1">:</span>
+        <span class="s2">if </span><span class="s1">total_sent &gt; </span><span class="s4">0 </span><span class="s2">and </span><span class="s1">hasattr(file</span><span class="s2">, </span><span class="s3">'seek'</span><span class="s1">):</span>
+            <span class="s1">file.seek(offset + total_sent)</span>
+
+
+<span class="s2">def </span><span class="s1">_eventlet_serve(sock</span><span class="s2">, </span><span class="s1">handle</span><span class="s2">, </span><span class="s1">concurrency):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Serve requests forever. 
+ 
+    This code is nearly identical to ``eventlet.convenience.serve`` except 
+    that it attempts to join the pool at the end, which allows for gunicorn 
+    graceful shutdowns. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">pool = eventlet.greenpool.GreenPool(concurrency)</span>
+    <span class="s1">server_gt = eventlet.greenthread.getcurrent()</span>
+
+    <span class="s2">while True</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">conn</span><span class="s2">, </span><span class="s1">addr = sock.accept()</span>
+            <span class="s1">gt = pool.spawn(handle</span><span class="s2">, </span><span class="s1">conn</span><span class="s2">, </span><span class="s1">addr)</span>
+            <span class="s1">gt.link(_eventlet_stop</span><span class="s2">, </span><span class="s1">server_gt</span><span class="s2">, </span><span class="s1">conn)</span>
+            <span class="s1">conn</span><span class="s2">, </span><span class="s1">addr</span><span class="s2">, </span><span class="s1">gt = </span><span class="s2">None, None, None</span>
+        <span class="s2">except </span><span class="s1">eventlet.StopServe:</span>
+            <span class="s1">sock.close()</span>
+            <span class="s1">pool.waitall()</span>
+            <span class="s2">return</span>
+
+
+<span class="s2">def </span><span class="s1">_eventlet_stop(client</span><span class="s2">, </span><span class="s1">server</span><span class="s2">, </span><span class="s1">conn):</span>
+    <span class="s5">&quot;&quot;&quot; 
+    Stop a greenlet handling a request and close its connection. 
+ 
+    This code is lifted from eventlet so as not to depend on undocumented 
+    functions in the library. 
+    &quot;&quot;&quot;</span>
+    <span class="s2">try</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">client.wait()</span>
+        <span class="s2">finally</span><span class="s1">:</span>
+            <span class="s1">conn.close()</span>
+    <span class="s2">except </span><span class="s1">greenlet.GreenletExit:</span>
+        <span class="s2">pass</span>
+    <span class="s2">except </span><span class="s1">Exception:</span>
+        <span class="s1">greenthread.kill(server</span><span class="s2">, </span><span class="s1">*sys.exc_info())</span>
+
+
+<span class="s2">def </span><span class="s1">patch_sendfile():</span>
+    <span class="s0"># As of eventlet 0.25.1, GreenSocket.sendfile doesn't exist,</span>
+    <span class="s0"># meaning the native implementations of socket.sendfile will be used.</span>
+    <span class="s0"># If os.sendfile exists, it will attempt to use that, failing explicitly</span>
+    <span class="s0"># if the socket is in non-blocking mode, which the underlying</span>
+    <span class="s0"># socket object /is/. Even the regular _sendfile_use_send will</span>
+    <span class="s0"># fail in that way; plus, it would use the underlying socket.send which isn't</span>
+    <span class="s0"># properly cooperative. So we have to monkey-patch a working socket.sendfile()</span>
+    <span class="s0"># into GreenSocket; in this method, `self.send` will be the GreenSocket's</span>
+    <span class="s0"># send method which is properly cooperative.</span>
+    <span class="s2">if not </span><span class="s1">hasattr(GreenSocket</span><span class="s2">, </span><span class="s3">'sendfile'</span><span class="s1">):</span>
+        <span class="s1">GreenSocket.sendfile = _eventlet_socket_sendfile</span>
+
+
+<span class="s2">class </span><span class="s1">EventletWorker(AsyncWorker):</span>
+
+    <span class="s2">def </span><span class="s1">patch(self):</span>
+        <span class="s1">hubs.use_hub()</span>
+        <span class="s1">eventlet.monkey_patch()</span>
+        <span class="s1">patch_sendfile()</span>
+
+    <span class="s2">def </span><span class="s1">is_already_handled(self</span><span class="s2">, </span><span class="s1">respiter):</span>
+        <span class="s0"># eventlet &gt;= 0.30.3</span>
+        <span class="s2">if </span><span class="s1">getattr(EVENTLET_WSGI_LOCAL</span><span class="s2">, </span><span class="s3">&quot;already_handled&quot;</span><span class="s2">, None</span><span class="s1">):</span>
+            <span class="s2">raise </span><span class="s1">StopIteration()</span>
+        <span class="s0"># eventlet &lt; 0.30.3</span>
+        <span class="s2">if </span><span class="s1">respiter == EVENTLET_ALREADY_HANDLED:</span>
+            <span class="s2">raise </span><span class="s1">StopIteration()</span>
+        <span class="s2">return </span><span class="s1">super().is_already_handled(respiter)</span>
+
+    <span class="s2">def </span><span class="s1">init_process(self):</span>
+        <span class="s1">self.patch()</span>
+        <span class="s1">super().init_process()</span>
+
+    <span class="s2">def </span><span class="s1">handle_quit(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">eventlet.spawn(super().handle_quit</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame)</span>
+
+    <span class="s2">def </span><span class="s1">handle_usr1(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">eventlet.spawn(super().handle_usr1</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame)</span>
+
+    <span class="s2">def </span><span class="s1">timeout_ctx(self):</span>
+        <span class="s2">return </span><span class="s1">eventlet.Timeout(self.cfg.keepalive </span><span class="s2">or None, False</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">handle(self</span><span class="s2">, </span><span class="s1">listener</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">addr):</span>
+        <span class="s2">if </span><span class="s1">self.cfg.is_ssl:</span>
+            <span class="s1">client = ssl_wrap_socket(client</span><span class="s2">, </span><span class="s1">self.cfg)</span>
+        <span class="s1">super().handle(listener</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">addr)</span>
+
+    <span class="s2">def </span><span class="s1">run(self):</span>
+        <span class="s1">acceptors = []</span>
+        <span class="s2">for </span><span class="s1">sock </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">gsock = GreenSocket(sock)</span>
+            <span class="s1">gsock.setblocking(</span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s1">hfun = partial(self.handle</span><span class="s2">, </span><span class="s1">gsock)</span>
+            <span class="s1">acceptor = eventlet.spawn(_eventlet_serve</span><span class="s2">, </span><span class="s1">gsock</span><span class="s2">, </span><span class="s1">hfun</span><span class="s2">,</span>
+                                      <span class="s1">self.worker_connections)</span>
+
+            <span class="s1">acceptors.append(acceptor)</span>
+            <span class="s1">eventlet.sleep(</span><span class="s4">0.0</span><span class="s1">)</span>
+
+        <span class="s2">while </span><span class="s1">self.alive:</span>
+            <span class="s1">self.notify()</span>
+            <span class="s1">eventlet.sleep(</span><span class="s4">1.0</span><span class="s1">)</span>
+
+        <span class="s1">self.notify()</span>
+        <span class="s1">t = </span><span class="s2">None</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s2">with </span><span class="s1">eventlet.Timeout(self.cfg.graceful_timeout) </span><span class="s2">as </span><span class="s1">t:</span>
+                <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">acceptors:</span>
+                    <span class="s1">a.kill(eventlet.StopServe())</span>
+                <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">acceptors:</span>
+                    <span class="s1">a.wait()</span>
+        <span class="s2">except </span><span class="s1">eventlet.Timeout </span><span class="s2">as </span><span class="s1">te:</span>
+            <span class="s2">if </span><span class="s1">te != t:</span>
+                <span class="s2">raise</span>
+            <span class="s2">for </span><span class="s1">a </span><span class="s2">in </span><span class="s1">acceptors:</span>
+                <span class="s1">a.kill()</span>
+</pre>
+</body>
+</html>

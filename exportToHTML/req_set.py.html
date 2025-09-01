@@ -1,0 +1,140 @@
+<html>
+<head>
+<title>req_set.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+req_set.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">from </span><span class="s1">collections </span><span class="s0">import </span><span class="s1">OrderedDict</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Dict</span><span class="s0">, </span><span class="s1">List</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.packaging.specifiers </span><span class="s0">import </span><span class="s1">LegacySpecifier</span>
+<span class="s0">from </span><span class="s1">pip._vendor.packaging.utils </span><span class="s0">import </span><span class="s1">canonicalize_name</span>
+<span class="s0">from </span><span class="s1">pip._vendor.packaging.version </span><span class="s0">import </span><span class="s1">LegacyVersion</span>
+
+<span class="s0">from </span><span class="s1">pip._internal.req.req_install </span><span class="s0">import </span><span class="s1">InstallRequirement</span>
+<span class="s0">from </span><span class="s1">pip._internal.utils.deprecation </span><span class="s0">import </span><span class="s1">deprecated</span>
+
+<span class="s1">logger = logging.getLogger(__name__)</span>
+
+
+<span class="s0">class </span><span class="s1">RequirementSet:</span>
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">check_supported_wheels: bool = </span><span class="s0">True</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s2">&quot;&quot;&quot;Create a RequirementSet.&quot;&quot;&quot;</span>
+
+        <span class="s1">self.requirements: Dict[str</span><span class="s0">, </span><span class="s1">InstallRequirement] = OrderedDict()</span>
+        <span class="s1">self.check_supported_wheels = check_supported_wheels</span>
+
+        <span class="s1">self.unnamed_requirements: List[InstallRequirement] = []</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self) -&gt; str:</span>
+        <span class="s1">requirements = sorted(</span>
+            <span class="s1">(req </span><span class="s0">for </span><span class="s1">req </span><span class="s0">in </span><span class="s1">self.requirements.values() </span><span class="s0">if not </span><span class="s1">req.comes_from)</span><span class="s0">,</span>
+            <span class="s1">key=</span><span class="s0">lambda </span><span class="s1">req: canonicalize_name(req.name </span><span class="s0">or </span><span class="s3">&quot;&quot;</span><span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+        <span class="s0">return </span><span class="s3">&quot; &quot;</span><span class="s1">.join(str(req.req) </span><span class="s0">for </span><span class="s1">req </span><span class="s0">in </span><span class="s1">requirements)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self) -&gt; str:</span>
+        <span class="s1">requirements = sorted(</span>
+            <span class="s1">self.requirements.values()</span><span class="s0">,</span>
+            <span class="s1">key=</span><span class="s0">lambda </span><span class="s1">req: canonicalize_name(req.name </span><span class="s0">or </span><span class="s3">&quot;&quot;</span><span class="s1">)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+        <span class="s1">format_string = </span><span class="s3">&quot;&lt;{classname} object; {count} requirement(s): {reqs}&gt;&quot;</span>
+        <span class="s0">return </span><span class="s1">format_string.format(</span>
+            <span class="s1">classname=self.__class__.__name__</span><span class="s0">,</span>
+            <span class="s1">count=len(requirements)</span><span class="s0">,</span>
+            <span class="s1">reqs=</span><span class="s3">&quot;, &quot;</span><span class="s1">.join(str(req.req) </span><span class="s0">for </span><span class="s1">req </span><span class="s0">in </span><span class="s1">requirements)</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">add_unnamed_requirement(self</span><span class="s0">, </span><span class="s1">install_req: InstallRequirement) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">assert not </span><span class="s1">install_req.name</span>
+        <span class="s1">self.unnamed_requirements.append(install_req)</span>
+
+    <span class="s0">def </span><span class="s1">add_named_requirement(self</span><span class="s0">, </span><span class="s1">install_req: InstallRequirement) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">assert </span><span class="s1">install_req.name</span>
+
+        <span class="s1">project_name = canonicalize_name(install_req.name)</span>
+        <span class="s1">self.requirements[project_name] = install_req</span>
+
+    <span class="s0">def </span><span class="s1">has_requirement(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; bool:</span>
+        <span class="s1">project_name = canonicalize_name(name)</span>
+
+        <span class="s0">return </span><span class="s1">(</span>
+            <span class="s1">project_name </span><span class="s0">in </span><span class="s1">self.requirements</span>
+            <span class="s0">and not </span><span class="s1">self.requirements[project_name].constraint</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">get_requirement(self</span><span class="s0">, </span><span class="s1">name: str) -&gt; InstallRequirement:</span>
+        <span class="s1">project_name = canonicalize_name(name)</span>
+
+        <span class="s0">if </span><span class="s1">project_name </span><span class="s0">in </span><span class="s1">self.requirements:</span>
+            <span class="s0">return </span><span class="s1">self.requirements[project_name]</span>
+
+        <span class="s0">raise </span><span class="s1">KeyError(</span><span class="s3">f&quot;No project with the name </span><span class="s0">{</span><span class="s1">name</span><span class="s0">!r}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">all_requirements(self) -&gt; List[InstallRequirement]:</span>
+        <span class="s0">return </span><span class="s1">self.unnamed_requirements + list(self.requirements.values())</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">requirements_to_install(self) -&gt; List[InstallRequirement]:</span>
+        <span class="s2">&quot;&quot;&quot;Return the list of requirements that need to be installed. 
+ 
+        TODO remove this property together with the legacy resolver, since the new 
+             resolver only returns requirements that need to be installed. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">[</span>
+            <span class="s1">install_req</span>
+            <span class="s0">for </span><span class="s1">install_req </span><span class="s0">in </span><span class="s1">self.all_requirements</span>
+            <span class="s0">if not </span><span class="s1">install_req.constraint </span><span class="s0">and not </span><span class="s1">install_req.satisfied_by</span>
+        <span class="s1">]</span>
+
+    <span class="s0">def </span><span class="s1">warn_legacy_versions_and_specifiers(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">for </span><span class="s1">req </span><span class="s0">in </span><span class="s1">self.requirements_to_install:</span>
+            <span class="s1">version = req.get_dist().version</span>
+            <span class="s0">if </span><span class="s1">isinstance(version</span><span class="s0">, </span><span class="s1">LegacyVersion):</span>
+                <span class="s1">deprecated(</span>
+                    <span class="s1">reason=(</span>
+                        <span class="s3">f&quot;pip has selected the non standard version </span><span class="s0">{</span><span class="s1">version</span><span class="s0">} </span><span class="s3">&quot;</span>
+                        <span class="s3">f&quot;of </span><span class="s0">{</span><span class="s1">req</span><span class="s0">}</span><span class="s3">. In the future this version will be &quot;</span>
+                        <span class="s3">f&quot;ignored as it isn't standard compliant.&quot;</span>
+                    <span class="s1">)</span><span class="s0">,</span>
+                    <span class="s1">replacement=(</span>
+                        <span class="s3">&quot;set or update constraints to select another version &quot;</span>
+                        <span class="s3">&quot;or contact the package author to fix the version number&quot;</span>
+                    <span class="s1">)</span><span class="s0">,</span>
+                    <span class="s1">issue=</span><span class="s4">12063</span><span class="s0">,</span>
+                    <span class="s1">gone_in=</span><span class="s3">&quot;23.3&quot;</span><span class="s0">,</span>
+                <span class="s1">)</span>
+            <span class="s0">for </span><span class="s1">dep </span><span class="s0">in </span><span class="s1">req.get_dist().iter_dependencies():</span>
+                <span class="s0">if </span><span class="s1">any(isinstance(spec</span><span class="s0">, </span><span class="s1">LegacySpecifier) </span><span class="s0">for </span><span class="s1">spec </span><span class="s0">in </span><span class="s1">dep.specifier):</span>
+                    <span class="s1">deprecated(</span>
+                        <span class="s1">reason=(</span>
+                            <span class="s3">f&quot;pip has selected </span><span class="s0">{</span><span class="s1">req</span><span class="s0">} {</span><span class="s1">version</span><span class="s0">} </span><span class="s3">which has non &quot;</span>
+                            <span class="s3">f&quot;standard dependency specifier </span><span class="s0">{</span><span class="s1">dep</span><span class="s0">}</span><span class="s3">. &quot;</span>
+                            <span class="s3">f&quot;In the future this version of </span><span class="s0">{</span><span class="s1">req</span><span class="s0">} </span><span class="s3">will be &quot;</span>
+                            <span class="s3">f&quot;ignored as it isn't standard compliant.&quot;</span>
+                        <span class="s1">)</span><span class="s0">,</span>
+                        <span class="s1">replacement=(</span>
+                            <span class="s3">&quot;set or update constraints to select another version &quot;</span>
+                            <span class="s3">&quot;or contact the package author to fix the version number&quot;</span>
+                        <span class="s1">)</span><span class="s0">,</span>
+                        <span class="s1">issue=</span><span class="s4">12063</span><span class="s0">,</span>
+                        <span class="s1">gone_in=</span><span class="s3">&quot;23.3&quot;</span><span class="s0">,</span>
+                    <span class="s1">)</span>
+</pre>
+</body>
+</html>

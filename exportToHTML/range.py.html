@@ -1,0 +1,202 @@
+<html>
+<head>
+<title>range.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #808080;}
+.s4 { color: #6a8759;}
+.s5 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+range.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+
+<span class="s0">class </span><span class="s1">IfRange:</span>
+    <span class="s2">&quot;&quot;&quot;Very simple object that represents the `If-Range` header in parsed 
+    form.  It will either have neither a etag or date or one of either but 
+    never both. 
+ 
+    .. versionadded:: 0.7 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">etag=</span><span class="s0">None, </span><span class="s1">date=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s3">#: The etag parsed and unquoted.  Ranges always operate on strong</span>
+        <span class="s3">#: etags so the weakness information is not necessary.</span>
+        <span class="s1">self.etag = etag</span>
+        <span class="s3">#: The date in parsed format or `None`.</span>
+        <span class="s1">self.date = date</span>
+
+    <span class="s0">def </span><span class="s1">to_header(self):</span>
+        <span class="s2">&quot;&quot;&quot;Converts the object back into an HTTP header.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self.date </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">http.http_date(self.date)</span>
+        <span class="s0">if </span><span class="s1">self.etag </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">http.quote_etag(self.etag)</span>
+        <span class="s0">return </span><span class="s4">&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self):</span>
+        <span class="s0">return </span><span class="s1">self.to_header()</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self):</span>
+        <span class="s0">return </span><span class="s4">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">str(self)</span><span class="s0">!r}</span><span class="s4">&gt;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">Range:</span>
+    <span class="s2">&quot;&quot;&quot;Represents a ``Range`` header. All methods only support only 
+    bytes as the unit. Stores a list of ranges if given, but the methods 
+    only work if only one range is provided. 
+ 
+    :raise ValueError: If the ranges provided are invalid. 
+ 
+    .. versionchanged:: 0.15 
+        The ranges passed in are validated. 
+ 
+    .. versionadded:: 0.7 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">units</span><span class="s0">, </span><span class="s1">ranges):</span>
+        <span class="s3">#: The units of this range.  Usually &quot;bytes&quot;.</span>
+        <span class="s1">self.units = units</span>
+        <span class="s3">#: A list of ``(begin, end)`` tuples for the range header provided.</span>
+        <span class="s3">#: The ranges are non-inclusive.</span>
+        <span class="s1">self.ranges = ranges</span>
+
+        <span class="s0">for </span><span class="s1">start</span><span class="s0">, </span><span class="s1">end </span><span class="s0">in </span><span class="s1">ranges:</span>
+            <span class="s0">if </span><span class="s1">start </span><span class="s0">is None or </span><span class="s1">(end </span><span class="s0">is not None and </span><span class="s1">(start &lt; </span><span class="s5">0 </span><span class="s0">or </span><span class="s1">start &gt;= end)):</span>
+                <span class="s0">raise </span><span class="s1">ValueError(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">(start</span><span class="s0">, </span><span class="s1">end)</span><span class="s0">} </span><span class="s4">is not a valid range.&quot;</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">range_for_length(self</span><span class="s0">, </span><span class="s1">length):</span>
+        <span class="s2">&quot;&quot;&quot;If the range is for bytes, the length is not None and there is 
+        exactly one range and it is satisfiable it returns a ``(start, stop)`` 
+        tuple, otherwise `None`. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self.units != </span><span class="s4">&quot;bytes&quot; </span><span class="s0">or </span><span class="s1">length </span><span class="s0">is None or </span><span class="s1">len(self.ranges) != </span><span class="s5">1</span><span class="s1">:</span>
+            <span class="s0">return None</span>
+        <span class="s1">start</span><span class="s0">, </span><span class="s1">end = self.ranges[</span><span class="s5">0</span><span class="s1">]</span>
+        <span class="s0">if </span><span class="s1">end </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">end = length</span>
+            <span class="s0">if </span><span class="s1">start &lt; </span><span class="s5">0</span><span class="s1">:</span>
+                <span class="s1">start += length</span>
+        <span class="s0">if </span><span class="s1">http.is_byte_range_valid(start</span><span class="s0">, </span><span class="s1">end</span><span class="s0">, </span><span class="s1">length):</span>
+            <span class="s0">return </span><span class="s1">start</span><span class="s0">, </span><span class="s1">min(end</span><span class="s0">, </span><span class="s1">length)</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">make_content_range(self</span><span class="s0">, </span><span class="s1">length):</span>
+        <span class="s2">&quot;&quot;&quot;Creates a :class:`~werkzeug.datastructures.ContentRange` object 
+        from the current range and given content length. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">rng = self.range_for_length(length)</span>
+        <span class="s0">if </span><span class="s1">rng </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">ContentRange(self.units</span><span class="s0">, </span><span class="s1">rng[</span><span class="s5">0</span><span class="s1">]</span><span class="s0">, </span><span class="s1">rng[</span><span class="s5">1</span><span class="s1">]</span><span class="s0">, </span><span class="s1">length)</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">to_header(self):</span>
+        <span class="s2">&quot;&quot;&quot;Converts the object back into an HTTP header.&quot;&quot;&quot;</span>
+        <span class="s1">ranges = []</span>
+        <span class="s0">for </span><span class="s1">begin</span><span class="s0">, </span><span class="s1">end </span><span class="s0">in </span><span class="s1">self.ranges:</span>
+            <span class="s0">if </span><span class="s1">end </span><span class="s0">is None</span><span class="s1">:</span>
+                <span class="s1">ranges.append(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">begin</span><span class="s0">}</span><span class="s4">-&quot; </span><span class="s0">if </span><span class="s1">begin &gt;= </span><span class="s5">0 </span><span class="s0">else </span><span class="s1">str(begin))</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">ranges.append(</span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">begin</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">end - </span><span class="s5">1</span><span class="s0">}</span><span class="s4">&quot;</span><span class="s1">)</span>
+        <span class="s0">return </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self.units</span><span class="s0">}</span><span class="s4">=</span><span class="s0">{</span><span class="s4">','</span><span class="s1">.join(ranges)</span><span class="s0">}</span><span class="s4">&quot;</span>
+
+    <span class="s0">def </span><span class="s1">to_content_range_header(self</span><span class="s0">, </span><span class="s1">length):</span>
+        <span class="s2">&quot;&quot;&quot;Converts the object into `Content-Range` HTTP header, 
+        based on given length 
+        &quot;&quot;&quot;</span>
+        <span class="s1">range = self.range_for_length(length)</span>
+        <span class="s0">if </span><span class="s1">range </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self.units</span><span class="s0">} {</span><span class="s1">range[</span><span class="s5">0</span><span class="s1">]</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">range[</span><span class="s5">1</span><span class="s1">] - </span><span class="s5">1</span><span class="s0">}</span><span class="s4">/</span><span class="s0">{</span><span class="s1">length</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s0">return None</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self):</span>
+        <span class="s0">return </span><span class="s1">self.to_header()</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self):</span>
+        <span class="s0">return </span><span class="s4">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">str(self)</span><span class="s0">!r}</span><span class="s4">&gt;&quot;</span>
+
+
+<span class="s0">def </span><span class="s1">_callback_property(name):</span>
+    <span class="s0">def </span><span class="s1">fget(self):</span>
+        <span class="s0">return </span><span class="s1">getattr(self</span><span class="s0">, </span><span class="s1">name)</span>
+
+    <span class="s0">def </span><span class="s1">fset(self</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s1">setattr(self</span><span class="s0">, </span><span class="s1">name</span><span class="s0">, </span><span class="s1">value)</span>
+        <span class="s0">if </span><span class="s1">self.on_update </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.on_update(self)</span>
+
+    <span class="s0">return </span><span class="s1">property(fget</span><span class="s0">, </span><span class="s1">fset)</span>
+
+
+<span class="s0">class </span><span class="s1">ContentRange:</span>
+    <span class="s2">&quot;&quot;&quot;Represents the content range header. 
+ 
+    .. versionadded:: 0.7 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">units</span><span class="s0">, </span><span class="s1">start</span><span class="s0">, </span><span class="s1">stop</span><span class="s0">, </span><span class="s1">length=</span><span class="s0">None, </span><span class="s1">on_update=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s0">assert </span><span class="s1">http.is_byte_range_valid(start</span><span class="s0">, </span><span class="s1">stop</span><span class="s0">, </span><span class="s1">length)</span><span class="s0">, </span><span class="s4">&quot;Bad range provided&quot;</span>
+        <span class="s1">self.on_update = on_update</span>
+        <span class="s1">self.set(start</span><span class="s0">, </span><span class="s1">stop</span><span class="s0">, </span><span class="s1">length</span><span class="s0">, </span><span class="s1">units)</span>
+
+    <span class="s3">#: The units to use, usually &quot;bytes&quot;</span>
+    <span class="s1">units = _callback_property(</span><span class="s4">&quot;_units&quot;</span><span class="s1">)</span>
+    <span class="s3">#: The start point of the range or `None`.</span>
+    <span class="s1">start = _callback_property(</span><span class="s4">&quot;_start&quot;</span><span class="s1">)</span>
+    <span class="s3">#: The stop point of the range (non-inclusive) or `None`.  Can only be</span>
+    <span class="s3">#: `None` if also start is `None`.</span>
+    <span class="s1">stop = _callback_property(</span><span class="s4">&quot;_stop&quot;</span><span class="s1">)</span>
+    <span class="s3">#: The length of the range or `None`.</span>
+    <span class="s1">length = _callback_property(</span><span class="s4">&quot;_length&quot;</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">set(self</span><span class="s0">, </span><span class="s1">start</span><span class="s0">, </span><span class="s1">stop</span><span class="s0">, </span><span class="s1">length=</span><span class="s0">None, </span><span class="s1">units=</span><span class="s4">&quot;bytes&quot;</span><span class="s1">):</span>
+        <span class="s2">&quot;&quot;&quot;Simple method to update the ranges.&quot;&quot;&quot;</span>
+        <span class="s0">assert </span><span class="s1">http.is_byte_range_valid(start</span><span class="s0">, </span><span class="s1">stop</span><span class="s0">, </span><span class="s1">length)</span><span class="s0">, </span><span class="s4">&quot;Bad range provided&quot;</span>
+        <span class="s1">self._units = units</span>
+        <span class="s1">self._start = start</span>
+        <span class="s1">self._stop = stop</span>
+        <span class="s1">self._length = length</span>
+        <span class="s0">if </span><span class="s1">self.on_update </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.on_update(self)</span>
+
+    <span class="s0">def </span><span class="s1">unset(self):</span>
+        <span class="s2">&quot;&quot;&quot;Sets the units to `None` which indicates that the header should 
+        no longer be used. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.set(</span><span class="s0">None, None, </span><span class="s1">units=</span><span class="s0">None</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">to_header(self):</span>
+        <span class="s0">if </span><span class="s1">self.units </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self.length </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">length = </span><span class="s4">&quot;*&quot;</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">length = self.length</span>
+        <span class="s0">if </span><span class="s1">self.start </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self.units</span><span class="s0">} </span><span class="s4">*/</span><span class="s0">{</span><span class="s1">length</span><span class="s0">}</span><span class="s4">&quot;</span>
+        <span class="s0">return </span><span class="s4">f&quot;</span><span class="s0">{</span><span class="s1">self.units</span><span class="s0">} {</span><span class="s1">self.start</span><span class="s0">}</span><span class="s4">-</span><span class="s0">{</span><span class="s1">self.stop - </span><span class="s5">1</span><span class="s0">}</span><span class="s4">/</span><span class="s0">{</span><span class="s1">length</span><span class="s0">}</span><span class="s4">&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__bool__(self):</span>
+        <span class="s0">return </span><span class="s1">self.units </span><span class="s0">is not None</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self):</span>
+        <span class="s0">return </span><span class="s1">self.to_header()</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self):</span>
+        <span class="s0">return </span><span class="s4">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">str(self)</span><span class="s0">!r}</span><span class="s4">&gt;&quot;</span>
+
+
+<span class="s3"># circular dependencies</span>
+<span class="s0">from </span><span class="s1">.. </span><span class="s0">import </span><span class="s1">http</span>
+</pre>
+</body>
+</html>

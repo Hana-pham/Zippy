@@ -1,0 +1,90 @@
+<html>
+<head>
+<title>progress_bars.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #6897bb;}
+.s4 { color: #629755; font-style: italic;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+progress_bars.py</font>
+</center></td></tr></table>
+<pre><span class="s0">import </span><span class="s1">functools</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">Callable</span><span class="s0">, </span><span class="s1">Generator</span><span class="s0">, </span><span class="s1">Iterable</span><span class="s0">, </span><span class="s1">Iterator</span><span class="s0">, </span><span class="s1">Optional</span><span class="s0">, </span><span class="s1">Tuple</span>
+
+<span class="s0">from </span><span class="s1">pip._vendor.rich.progress </span><span class="s0">import </span><span class="s1">(</span>
+    <span class="s1">BarColumn</span><span class="s0">,</span>
+    <span class="s1">DownloadColumn</span><span class="s0">,</span>
+    <span class="s1">FileSizeColumn</span><span class="s0">,</span>
+    <span class="s1">Progress</span><span class="s0">,</span>
+    <span class="s1">ProgressColumn</span><span class="s0">,</span>
+    <span class="s1">SpinnerColumn</span><span class="s0">,</span>
+    <span class="s1">TextColumn</span><span class="s0">,</span>
+    <span class="s1">TimeElapsedColumn</span><span class="s0">,</span>
+    <span class="s1">TimeRemainingColumn</span><span class="s0">,</span>
+    <span class="s1">TransferSpeedColumn</span><span class="s0">,</span>
+<span class="s1">)</span>
+
+<span class="s0">from </span><span class="s1">pip._internal.utils.logging </span><span class="s0">import </span><span class="s1">get_indentation</span>
+
+<span class="s1">DownloadProgressRenderer = Callable[[Iterable[bytes]]</span><span class="s0">, </span><span class="s1">Iterator[bytes]]</span>
+
+
+<span class="s0">def </span><span class="s1">_rich_progress_bar(</span>
+    <span class="s1">iterable: Iterable[bytes]</span><span class="s0">,</span>
+    <span class="s1">*</span><span class="s0">,</span>
+    <span class="s1">bar_type: str</span><span class="s0">,</span>
+    <span class="s1">size: int</span><span class="s0">,</span>
+<span class="s1">) -&gt; Generator[bytes</span><span class="s0">, None, None</span><span class="s1">]:</span>
+    <span class="s0">assert </span><span class="s1">bar_type == </span><span class="s2">&quot;on&quot;</span><span class="s0">, </span><span class="s2">&quot;This should only be used in the default mode.&quot;</span>
+
+    <span class="s0">if not </span><span class="s1">size:</span>
+        <span class="s1">total = float(</span><span class="s2">&quot;inf&quot;</span><span class="s1">)</span>
+        <span class="s1">columns: Tuple[ProgressColumn</span><span class="s0">, </span><span class="s1">...] = (</span>
+            <span class="s1">TextColumn(</span><span class="s2">&quot;[progress.description]{task.description}&quot;</span><span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">SpinnerColumn(</span><span class="s2">&quot;line&quot;</span><span class="s0">, </span><span class="s1">speed=</span><span class="s3">1.5</span><span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">FileSizeColumn()</span><span class="s0">,</span>
+            <span class="s1">TransferSpeedColumn()</span><span class="s0">,</span>
+            <span class="s1">TimeElapsedColumn()</span><span class="s0">,</span>
+        <span class="s1">)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s1">total = size</span>
+        <span class="s1">columns = (</span>
+            <span class="s1">TextColumn(</span><span class="s2">&quot;[progress.description]{task.description}&quot;</span><span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">BarColumn()</span><span class="s0">,</span>
+            <span class="s1">DownloadColumn()</span><span class="s0">,</span>
+            <span class="s1">TransferSpeedColumn()</span><span class="s0">,</span>
+            <span class="s1">TextColumn(</span><span class="s2">&quot;eta&quot;</span><span class="s1">)</span><span class="s0">,</span>
+            <span class="s1">TimeRemainingColumn()</span><span class="s0">,</span>
+        <span class="s1">)</span>
+
+    <span class="s1">progress = Progress(*columns</span><span class="s0">, </span><span class="s1">refresh_per_second=</span><span class="s3">30</span><span class="s1">)</span>
+    <span class="s1">task_id = progress.add_task(</span><span class="s2">&quot; &quot; </span><span class="s1">* (get_indentation() + </span><span class="s3">2</span><span class="s1">)</span><span class="s0">, </span><span class="s1">total=total)</span>
+    <span class="s0">with </span><span class="s1">progress:</span>
+        <span class="s0">for </span><span class="s1">chunk </span><span class="s0">in </span><span class="s1">iterable:</span>
+            <span class="s0">yield </span><span class="s1">chunk</span>
+            <span class="s1">progress.update(task_id</span><span class="s0">, </span><span class="s1">advance=len(chunk))</span>
+
+
+<span class="s0">def </span><span class="s1">get_download_progress_renderer(</span>
+    <span class="s1">*</span><span class="s0">, </span><span class="s1">bar_type: str</span><span class="s0">, </span><span class="s1">size: Optional[int] = </span><span class="s0">None</span>
+<span class="s1">) -&gt; DownloadProgressRenderer:</span>
+    <span class="s4">&quot;&quot;&quot;Get an object that can be used to render the download progress. 
+ 
+    Returns a callable, that takes an iterable to &quot;wrap&quot;. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">if </span><span class="s1">bar_type == </span><span class="s2">&quot;on&quot;</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">functools.partial(_rich_progress_bar</span><span class="s0">, </span><span class="s1">bar_type=bar_type</span><span class="s0">, </span><span class="s1">size=size)</span>
+    <span class="s0">else</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">iter  </span><span class="s5"># no-op, when passed an iterator</span>
+</pre>
+</body>
+</html>

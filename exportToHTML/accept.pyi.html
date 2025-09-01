@@ -1,0 +1,73 @@
+<html>
+<head>
+<title>accept.pyi</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+accept.pyi</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterable</span>
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Iterator</span>
+<span class="s0">from </span><span class="s1">typing </span><span class="s0">import </span><span class="s1">overload</span>
+
+<span class="s0">from </span><span class="s1">.structures </span><span class="s0">import </span><span class="s1">ImmutableList</span>
+
+<span class="s0">class </span><span class="s1">Accept(ImmutableList[tuple[str</span><span class="s0">, </span><span class="s1">int]]):</span>
+    <span class="s1">provided: bool</span>
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">values: Accept | Iterable[tuple[str</span><span class="s0">, </span><span class="s1">float]] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s0">def </span><span class="s1">_specificity(self</span><span class="s0">, </span><span class="s1">value: str) -&gt; tuple[bool</span><span class="s0">, </span><span class="s1">...]: ...</span>
+    <span class="s0">def </span><span class="s1">_value_matches(self</span><span class="s0">, </span><span class="s1">value: str</span><span class="s0">, </span><span class="s1">item: str) -&gt; bool: ...</span>
+    <span class="s1">@overload  </span><span class="s2"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; int: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">key: int) -&gt; tuple[str</span><span class="s0">, </span><span class="s1">int]: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">__getitem__(self</span><span class="s0">, </span><span class="s1">key: slice) -&gt; Iterable[tuple[str</span><span class="s0">, </span><span class="s1">int]]: ...</span>
+    <span class="s0">def </span><span class="s1">quality(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; int: ...</span>
+    <span class="s0">def </span><span class="s1">__contains__(self</span><span class="s0">, </span><span class="s1">value: str) -&gt; bool: ...  </span><span class="s2"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">index(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; int: ...  </span><span class="s2"># type: ignore</span>
+    <span class="s0">def </span><span class="s1">find(self</span><span class="s0">, </span><span class="s1">key: str) -&gt; int: ...</span>
+    <span class="s0">def </span><span class="s1">values(self) -&gt; Iterator[str]: ...</span>
+    <span class="s0">def </span><span class="s1">to_header(self) -&gt; str: ...</span>
+    <span class="s0">def </span><span class="s1">_best_single_match(self</span><span class="s0">, </span><span class="s1">match: str) -&gt; tuple[str</span><span class="s0">, </span><span class="s1">int] | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">best_match(self</span><span class="s0">, </span><span class="s1">matches: Iterable[str]</span><span class="s0">, </span><span class="s1">default: str) -&gt; str: ...</span>
+    <span class="s1">@overload</span>
+    <span class="s0">def </span><span class="s1">best_match(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">matches: Iterable[str]</span><span class="s0">, </span><span class="s1">default: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+    <span class="s1">) -&gt; str | </span><span class="s0">None</span><span class="s1">: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">best(self) -&gt; str: ...</span>
+
+<span class="s0">def </span><span class="s1">_normalize_mime(value: str) -&gt; list[str]: ...</span>
+
+<span class="s0">class </span><span class="s1">MIMEAccept(Accept):</span>
+    <span class="s0">def </span><span class="s1">_specificity(self</span><span class="s0">, </span><span class="s1">value: str) -&gt; tuple[bool</span><span class="s0">, </span><span class="s1">...]: ...</span>
+    <span class="s0">def </span><span class="s1">_value_matches(self</span><span class="s0">, </span><span class="s1">value: str</span><span class="s0">, </span><span class="s1">item: str) -&gt; bool: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">accept_html(self) -&gt; bool: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">accept_xhtml(self) -&gt; bool: ...</span>
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">accept_json(self) -&gt; bool: ...</span>
+
+<span class="s0">def </span><span class="s1">_normalize_lang(value: str) -&gt; list[str]: ...</span>
+
+<span class="s0">class </span><span class="s1">LanguageAccept(Accept):</span>
+    <span class="s0">def </span><span class="s1">_value_matches(self</span><span class="s0">, </span><span class="s1">value: str</span><span class="s0">, </span><span class="s1">item: str) -&gt; bool: ...</span>
+
+<span class="s0">class </span><span class="s1">CharsetAccept(Accept):</span>
+    <span class="s0">def </span><span class="s1">_value_matches(self</span><span class="s0">, </span><span class="s1">value: str</span><span class="s0">, </span><span class="s1">item: str) -&gt; bool: ...</span>
+</pre>
+</body>
+</html>

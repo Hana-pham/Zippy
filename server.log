@@ -1,0 +1,158 @@
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET /static/index.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET /static/images/thinkgrid-logo.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET /static/images/python-logo.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET /static/images/thinkgrid.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET /static/images/openai-logo.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:22:51] "GET /static/indexJS.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "POST /check-url HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "GET /loading HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "[32mPOST /extract HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "GET /loading HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "GET /static/loadingcss.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "[36mGET /static/images/thinkgrid.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "GET /static/loadingJS.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:00] "GET /stream/logs HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:10] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /display HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "[36mGET /static/index.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/displaycss.css HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/images/return.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/displayJS.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /check-images-count HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/output_images/Detail_3.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/output_images/Home_2.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/output_images/Thumbnail_1.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:20] "GET /static/output_images/Home%20Alternate_0.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:26] "GET /get-variations/1 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:26] "GET /static/sorted_images/screen_1/above_70/Home_2.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "GET /display HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/index.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/displaycss.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/displayJS.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/images/return.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "GET /check-images-count HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/output_images/Detail_3.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/output_images/Home_2.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/output_images/Thumbnail_1.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:31] "[36mGET /static/output_images/Home%20Alternate_0.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "POST /check-url HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "GET /loading HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "[32mPOST /extract HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "GET /loading HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "[36mGET /static/loadingcss.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "[36mGET /static/images/thinkgrid.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "[36mGET /static/loadingJS.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:23:55] "GET /stream/logs HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:05] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:15] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /display HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "[36mGET /static/displayJS.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "[36mGET /static/index.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "[36mGET /static/displaycss.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "[36mGET /static/images/return.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /check-images-count HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /static/output_images/Home%20Alternate_0.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /static/output_images/Detail_3.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /static/output_images/Home_2.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:24:25] "GET /static/output_images/Thumbnail_1.png HTTP/1.1" 200 -
+INFO:werkzeug:[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+INFO:werkzeug:[33mPress CTRL+C to quit[0m
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "GET / HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "[36mGET /static/index.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "[36mGET /static/images/python-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "[36mGET /static/images/thinkgrid.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "[36mGET /static/images/openai-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:18] "[36mGET /static/indexJS.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "POST /check-url HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "GET /loading HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "[32mPOST /extract HTTP/1.1[0m" 302 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "GET /loading HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "[36mGET /static/loadingcss.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "[36mGET /static/images/thinkgrid.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "GET /static/loadingJS.js HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:26] "GET /stream/logs HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:36] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:46] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /check-extraction-status HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /display HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "[36mGET /static/index.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "[36mGET /static/displaycss.css HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "[36mGET /static/images/thinkgrid-logo.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "[36mGET /static/displayJS.js HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "[36mGET /static/images/return.png HTTP/1.1[0m" 304 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /check-images-count HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /static/output_images/Home%20Alternate_0.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /static/output_images/Home_2.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /static/output_images/Thumbnail_1.png HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [12/Jun/2024 22:27:56] "GET /static/output_images/Detail_3.png HTTP/1.1" 200 -
+ERROR:root:/Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet50_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet50_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+INFO:root:huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+INFO:root:Collecting flask-socketio
+  Obtaining dependency information for flask-socketio from https://files.pythonhosted.org/packages/56/c8/dc0be9e26272dc89342868ecc2d9ddb9e31002b4b8e49fdb754aa0f9ecbf/Flask_SocketIO-5.3.6-py3-none-any.whl.metadata
+INFO:root:Downloading Flask_SocketIO-5.3.6-py3-none-any.whl.metadata (2.6 kB)
+Requirement already satisfied: Flask>=0.9 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from flask-socketio) (2.2.2)
+INFO:root:Collecting python-socketio>=5.0.2 (from flask-socketio)
+  Obtaining dependency information for python-socketio>=5.0.2 from https://files.pythonhosted.org/packages/af/bf/be12875b17709b591d8505811e513a88b31316e4ce0e801da351b4765ea5/python_socketio-5.11.2-py3-none-any.whl.metadata
+  Downloading python_socketio-5.11.2-py3-none-any.whl.metadata (3.2 kB)
+INFO:root:Requirement already satisfied: Werkzeug>=2.2.2 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from Flask>=0.9->flask-socketio) (2.2.3)
+Requirement already satisfied: Jinja2>=3.0 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from Flask>=0.9->flask-socketio) (3.1.2)
+Requirement already satisfied: itsdangerous>=2.0 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from Flask>=0.9->flask-socketio) (2.0.1)
+Requirement already satisfied: click>=8.0 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from Flask>=0.9->flask-socketio) (8.0.4)
+Collecting bidict>=0.21.0 (from python-socketio>=5.0.2->flask-socketio)
+  Obtaining dependency information for bidict>=0.21.0 from https://files.pythonhosted.org/packages/99/37/e8730c3587a65eb5645d4aba2d27aae48e8003614d6aaf15dda67f702f1f/bidict-0.23.1-py3-none-any.whl.metadata
+INFO:root:Downloading bidict-0.23.1-py3-none-any.whl.metadata (8.7 kB)
+Collecting python-engineio>=4.8.0 (from python-socketio>=5.0.2->flask-socketio)
+  Obtaining dependency information for python-engineio>=4.8.0 from https://files.pythonhosted.org/packages/ad/38/4642c75241686c9cf05d23c50b9ffbd760507292f12fdfb04adc2ab5d34a/python_engineio-4.9.1-py3-none-any.whl.metadata
+INFO:root:Downloading python_engineio-4.9.1-py3-none-any.whl.metadata (2.2 kB)
+Requirement already satisfied: MarkupSafe>=2.0 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from Jinja2>=3.0->Flask>=0.9->flask-socketio) (2.1.1)
+Collecting simple-websocket>=0.10.0 (from python-engineio>=4.8.0->python-socketio>=5.0.2->flask-socketio)
+  Obtaining dependency information for simple-websocket>=0.10.0 from https://files.pythonhosted.org/packages/6d/ea/288a8ac1d9551354488ff60c0ac6a76acc3b6b60f0460ac1944c75e240da/simple_websocket-1.0.0-py3-none-any.whl.metadata
+INFO:root:Downloading simple_websocket-1.0.0-py3-none-any.whl.metadata (1.3 kB)
+INFO:root:Collecting wsproto (from simple-websocket>=0.10.0->python-engineio>=4.8.0->python-socketio>=5.0.2->flask-socketio)
+  Obtaining dependency information for wsproto from https://files.pythonhosted.org/packages/78/58/e860788190eba3bcce367f74d29c4675466ce8dddfba85f7827588416f01/wsproto-1.2.0-py3-none-any.whl.metadata
+  Downloading wsproto-1.2.0-py3-none-any.whl.metadata (5.6 kB)
+INFO:root:Requirement already satisfied: h11<1,>=0.9.0 in /Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages (from wsproto->simple-websocket>=0.10.0->python-engineio>=4.8.0->python-socketio>=5.0.2->flask-socketio) (0.14.0)
+Downloading Flask_SocketIO-5.3.6-py3-none-any.whl (18 kB)
+Downloading python_socketio-5.11.2-py3-none-any.whl (75 kB)
+[?25l   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m0.0/75.7 kB[0m [31m?[0m eta [36m-:--:--[0m
+INFO:root:[2K   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m75.7/75.7 kB[0m [31m3.0 MB/s[0m eta [36m0:00:00[0m
+[?25hDownloading bidict-0.23.1-py3-none-any.whl (32 kB)
+INFO:root:Downloading python_engineio-4.9.1-py3-none-any.whl (57 kB)
+[?25l   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m0.0/57.7 kB[0m [31m?[0m eta [36m-:--:--[0m[2K   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m57.7/57.7 kB[0m [31m7.7 MB/s[0m eta [36m0:00:00[0m
+[?25hDownloading simple_websocket-1.0.0-py3-none-any.whl (13 kB)
+Downloading wsproto-1.2.0-py3-none-any.whl (24 kB)
+INFO:root:Installing collected packages: wsproto, bidict, simple-websocket, python-engineio, python-socketio, flask-socketio
+INFO:root:Successfully installed bidict-0.23.1 flask-socketio-5.3.6 python-engineio-4.9.1 python-socketio-5.11.2 simple-websocket-1.0.0 wsproto-1.2.0
+WARNING:werkzeug:Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+ERROR:root:/Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet50_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet50_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+WARNING:werkzeug:Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+WARNING:werkzeug:Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+ERROR:root:/Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet50_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet50_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+WARNING:werkzeug:Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+ERROR:root:/Users/yashbagia/Public/anaconda3/lib/python3.11/site-packages/torchvision/models/_utils.py:223: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=ResNet50_Weights.IMAGENET1K_V1`. You can also use `weights=ResNet50_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+WARNING:werkzeug:Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.
+WARNING:werkzeug:Werkzeug appears to be used in a production deployment. Consider switching to a production web server instead.

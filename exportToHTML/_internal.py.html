@@ -1,0 +1,235 @@
+<html>
+<head>
+<title>_internal.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #6a8759;}
+.s3 { color: #629755; font-style: italic;}
+.s4 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+_internal.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">logging</span>
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">sys</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">from </span><span class="s1">datetime </span><span class="s0">import </span><span class="s1">datetime</span>
+<span class="s0">from </span><span class="s1">datetime </span><span class="s0">import </span><span class="s1">timezone</span>
+
+<span class="s0">if </span><span class="s1">t.TYPE_CHECKING:</span>
+    <span class="s0">from </span><span class="s1">_typeshed.wsgi </span><span class="s0">import </span><span class="s1">WSGIEnvironment</span>
+    <span class="s0">from </span><span class="s1">.wrappers.request </span><span class="s0">import </span><span class="s1">Request</span>
+
+<span class="s1">_logger: logging.Logger | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None</span>
+
+
+<span class="s0">class </span><span class="s1">_Missing:</span>
+    <span class="s0">def </span><span class="s1">__repr__(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s2">&quot;no value&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__reduce__(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s2">&quot;_missing&quot;</span>
+
+
+<span class="s1">_missing = _Missing()</span>
+
+
+<span class="s0">def </span><span class="s1">_wsgi_decoding_dance(s: str) -&gt; str:</span>
+    <span class="s0">return </span><span class="s1">s.encode(</span><span class="s2">&quot;latin1&quot;</span><span class="s1">).decode(errors=</span><span class="s2">&quot;replace&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_wsgi_encoding_dance(s: str) -&gt; str:</span>
+    <span class="s0">return </span><span class="s1">s.encode().decode(</span><span class="s2">&quot;latin1&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">def </span><span class="s1">_get_environ(obj: WSGIEnvironment | Request) -&gt; WSGIEnvironment:</span>
+    <span class="s1">env = getattr(obj</span><span class="s0">, </span><span class="s2">&quot;environ&quot;</span><span class="s0">, </span><span class="s1">obj)</span>
+    <span class="s0">assert </span><span class="s1">isinstance(</span>
+        <span class="s1">env</span><span class="s0">, </span><span class="s1">dict</span>
+    <span class="s1">)</span><span class="s0">, </span><span class="s2">f&quot;</span><span class="s0">{</span><span class="s1">type(obj).__name__</span><span class="s0">!r} </span><span class="s2">is not a WSGI environment (has to be a dict)&quot;</span>
+    <span class="s0">return </span><span class="s1">env</span>
+
+
+<span class="s0">def </span><span class="s1">_has_level_handler(logger: logging.Logger) -&gt; bool:</span>
+    <span class="s3">&quot;&quot;&quot;Check if there is a handler in the logging chain that will handle 
+    the given logger's effective level. 
+    &quot;&quot;&quot;</span>
+    <span class="s1">level = logger.getEffectiveLevel()</span>
+    <span class="s1">current = logger</span>
+
+    <span class="s0">while </span><span class="s1">current:</span>
+        <span class="s0">if </span><span class="s1">any(handler.level &lt;= level </span><span class="s0">for </span><span class="s1">handler </span><span class="s0">in </span><span class="s1">current.handlers):</span>
+            <span class="s0">return True</span>
+
+        <span class="s0">if not </span><span class="s1">current.propagate:</span>
+            <span class="s0">break</span>
+
+        <span class="s1">current = current.parent  </span><span class="s4"># type: ignore</span>
+
+    <span class="s0">return False</span>
+
+
+<span class="s0">class </span><span class="s1">_ColorStreamHandler(logging.StreamHandler):</span>
+    <span class="s3">&quot;&quot;&quot;On Windows, wrap stream with Colorama for ANSI style support.&quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">try</span><span class="s1">:</span>
+            <span class="s0">import </span><span class="s1">colorama</span>
+        <span class="s0">except </span><span class="s1">ImportError:</span>
+            <span class="s1">stream = </span><span class="s0">None</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">stream = colorama.AnsiToWin32(sys.stderr)</span>
+
+        <span class="s1">super().__init__(stream)</span>
+
+
+<span class="s0">def </span><span class="s1">_log(type: str</span><span class="s0">, </span><span class="s1">message: str</span><span class="s0">, </span><span class="s1">*args: t.Any</span><span class="s0">, </span><span class="s1">**kwargs: t.Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s3">&quot;&quot;&quot;Log a message to the 'werkzeug' logger. 
+ 
+    The logger is created the first time it is needed. If there is no 
+    level set, it is set to :data:`logging.INFO`. If there is no handler 
+    for the logger's effective level, a :class:`logging.StreamHandler` 
+    is added. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">global </span><span class="s1">_logger</span>
+
+    <span class="s0">if </span><span class="s1">_logger </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s1">_logger = logging.getLogger(</span><span class="s2">&quot;werkzeug&quot;</span><span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">_logger.level == logging.NOTSET:</span>
+            <span class="s1">_logger.setLevel(logging.INFO)</span>
+
+        <span class="s0">if not </span><span class="s1">_has_level_handler(_logger):</span>
+            <span class="s1">_logger.addHandler(_ColorStreamHandler())</span>
+
+    <span class="s1">getattr(_logger</span><span class="s0">, </span><span class="s1">type)(message.rstrip()</span><span class="s0">, </span><span class="s1">*args</span><span class="s0">, </span><span class="s1">**kwargs)</span>
+
+
+<span class="s1">@t.overload</span>
+<span class="s0">def </span><span class="s1">_dt_as_utc(dt: </span><span class="s0">None</span><span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s1">...</span>
+
+
+<span class="s1">@t.overload</span>
+<span class="s0">def </span><span class="s1">_dt_as_utc(dt: datetime) -&gt; datetime:</span>
+    <span class="s1">...</span>
+
+
+<span class="s0">def </span><span class="s1">_dt_as_utc(dt: datetime | </span><span class="s0">None</span><span class="s1">) -&gt; datetime | </span><span class="s0">None</span><span class="s1">:</span>
+    <span class="s0">if </span><span class="s1">dt </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">dt</span>
+
+    <span class="s0">if </span><span class="s1">dt.tzinfo </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">return </span><span class="s1">dt.replace(tzinfo=timezone.utc)</span>
+    <span class="s0">elif </span><span class="s1">dt.tzinfo != timezone.utc:</span>
+        <span class="s0">return </span><span class="s1">dt.astimezone(timezone.utc)</span>
+
+    <span class="s0">return </span><span class="s1">dt</span>
+
+
+<span class="s1">_TAccessorValue = t.TypeVar(</span><span class="s2">&quot;_TAccessorValue&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">_DictAccessorProperty(t.Generic[_TAccessorValue]):</span>
+    <span class="s3">&quot;&quot;&quot;Baseclass for `environ_property` and `header_property`.&quot;&quot;&quot;</span>
+
+    <span class="s1">read_only = </span><span class="s0">False</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">name: str</span><span class="s0">,</span>
+        <span class="s1">default: _TAccessorValue | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">load_func: t.Callable[[str]</span><span class="s0">, </span><span class="s1">_TAccessorValue] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">dump_func: t.Callable[[_TAccessorValue]</span><span class="s0">, </span><span class="s1">str] | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">read_only: bool | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">doc: str | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.name = name</span>
+        <span class="s1">self.default = default</span>
+        <span class="s1">self.load_func = load_func</span>
+        <span class="s1">self.dump_func = dump_func</span>
+        <span class="s0">if </span><span class="s1">read_only </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.read_only = read_only</span>
+        <span class="s1">self.__doc__ = doc</span>
+
+    <span class="s0">def </span><span class="s1">lookup(self</span><span class="s0">, </span><span class="s1">instance: t.Any) -&gt; t.MutableMapping[str</span><span class="s0">, </span><span class="s1">t.Any]:</span>
+        <span class="s0">raise </span><span class="s1">NotImplementedError</span>
+
+    <span class="s1">@t.overload</span>
+    <span class="s0">def </span><span class="s1">__get__(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">instance: </span><span class="s0">None, </span><span class="s1">owner: type</span>
+    <span class="s1">) -&gt; _DictAccessorProperty[_TAccessorValue]:</span>
+        <span class="s1">...</span>
+
+    <span class="s1">@t.overload</span>
+    <span class="s0">def </span><span class="s1">__get__(self</span><span class="s0">, </span><span class="s1">instance: t.Any</span><span class="s0">, </span><span class="s1">owner: type) -&gt; _TAccessorValue:</span>
+        <span class="s1">...</span>
+
+    <span class="s0">def </span><span class="s1">__get__(</span>
+        <span class="s1">self</span><span class="s0">, </span><span class="s1">instance: t.Any | </span><span class="s0">None, </span><span class="s1">owner: type</span>
+    <span class="s1">) -&gt; _TAccessorValue | _DictAccessorProperty[_TAccessorValue]:</span>
+        <span class="s0">if </span><span class="s1">instance </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">return </span><span class="s1">self</span>
+
+        <span class="s1">storage = self.lookup(instance)</span>
+
+        <span class="s0">if </span><span class="s1">self.name </span><span class="s0">not in </span><span class="s1">storage:</span>
+            <span class="s0">return </span><span class="s1">self.default  </span><span class="s4"># type: ignore</span>
+
+        <span class="s1">value = storage[self.name]</span>
+
+        <span class="s0">if </span><span class="s1">self.load_func </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s0">try</span><span class="s1">:</span>
+                <span class="s0">return </span><span class="s1">self.load_func(value)</span>
+            <span class="s0">except </span><span class="s1">(ValueError</span><span class="s0">, </span><span class="s1">TypeError):</span>
+                <span class="s0">return </span><span class="s1">self.default  </span><span class="s4"># type: ignore</span>
+
+        <span class="s0">return </span><span class="s1">value  </span><span class="s4"># type: ignore</span>
+
+    <span class="s0">def </span><span class="s1">__set__(self</span><span class="s0">, </span><span class="s1">instance: t.Any</span><span class="s0">, </span><span class="s1">value: _TAccessorValue) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">self.read_only:</span>
+            <span class="s0">raise </span><span class="s1">AttributeError(</span><span class="s2">&quot;read only property&quot;</span><span class="s1">)</span>
+
+        <span class="s0">if </span><span class="s1">self.dump_func </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">self.lookup(instance)[self.name] = self.dump_func(value)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">self.lookup(instance)[self.name] = value</span>
+
+    <span class="s0">def </span><span class="s1">__delete__(self</span><span class="s0">, </span><span class="s1">instance: t.Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">self.read_only:</span>
+            <span class="s0">raise </span><span class="s1">AttributeError(</span><span class="s2">&quot;read only property&quot;</span><span class="s1">)</span>
+
+        <span class="s1">self.lookup(instance).pop(self.name</span><span class="s0">, None</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s2">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">self.name</span><span class="s0">}</span><span class="s2">&gt;&quot;</span>
+
+
+<span class="s1">_plain_int_re = re.compile(</span><span class="s2">r&quot;-?\d+&quot;</span><span class="s0">, </span><span class="s1">re.ASCII)</span>
+
+
+<span class="s0">def </span><span class="s1">_plain_int(value: str) -&gt; int:</span>
+    <span class="s3">&quot;&quot;&quot;Parse an int only if it is only ASCII digits and ``-``. 
+ 
+    This disallows ``+``, ``_``, and non-ASCII digits, which are accepted by ``int`` but 
+    are not allowed in HTTP header values. 
+ 
+    Any leading or trailing whitespace is stripped 
+    &quot;&quot;&quot;</span>
+    <span class="s1">value = value.strip()</span>
+    <span class="s0">if </span><span class="s1">_plain_int_re.fullmatch(value) </span><span class="s0">is None</span><span class="s1">:</span>
+        <span class="s0">raise </span><span class="s1">ValueError</span>
+
+    <span class="s0">return </span><span class="s1">int(value)</span>
+</pre>
+</body>
+</html>

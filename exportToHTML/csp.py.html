@@ -1,0 +1,114 @@
+<html>
+<head>
+<title>csp.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+csp.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">.mixins </span><span class="s0">import </span><span class="s1">UpdateDictMixin</span>
+
+
+<span class="s0">def </span><span class="s1">csp_property(key):</span>
+    <span class="s2">&quot;&quot;&quot;Return a new property object for a content security policy header. 
+    Useful if you want to add support for a csp extension in a 
+    subclass. 
+    &quot;&quot;&quot;</span>
+    <span class="s0">return </span><span class="s1">property(</span>
+        <span class="s0">lambda </span><span class="s1">x: x._get_value(key)</span><span class="s0">,</span>
+        <span class="s0">lambda </span><span class="s1">x</span><span class="s0">, </span><span class="s1">v: x._set_value(key</span><span class="s0">, </span><span class="s1">v)</span><span class="s0">,</span>
+        <span class="s0">lambda </span><span class="s1">x: x._del_value(key)</span><span class="s0">,</span>
+        <span class="s3">f&quot;accessor for </span><span class="s0">{</span><span class="s1">key</span><span class="s0">!r}</span><span class="s3">&quot;</span><span class="s0">,</span>
+    <span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">ContentSecurityPolicy(UpdateDictMixin</span><span class="s0">, </span><span class="s1">dict):</span>
+    <span class="s2">&quot;&quot;&quot;Subclass of a dict that stores values for a Content Security Policy 
+    header. It has accessors for all the level 3 policies. 
+ 
+    Because the csp directives in the HTTP header use dashes the 
+    python descriptors use underscores for that. 
+ 
+    To get a header of the :class:`ContentSecuirtyPolicy` object again 
+    you can convert the object into a string or call the 
+    :meth:`to_header` method.  If you plan to subclass it and add your 
+    own items have a look at the sourcecode for that class. 
+ 
+    .. versionadded:: 1.0.0 
+       Support for Content Security Policy headers was added. 
+ 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">base_uri = csp_property(</span><span class="s3">&quot;base-uri&quot;</span><span class="s1">)</span>
+    <span class="s1">child_src = csp_property(</span><span class="s3">&quot;child-src&quot;</span><span class="s1">)</span>
+    <span class="s1">connect_src = csp_property(</span><span class="s3">&quot;connect-src&quot;</span><span class="s1">)</span>
+    <span class="s1">default_src = csp_property(</span><span class="s3">&quot;default-src&quot;</span><span class="s1">)</span>
+    <span class="s1">font_src = csp_property(</span><span class="s3">&quot;font-src&quot;</span><span class="s1">)</span>
+    <span class="s1">form_action = csp_property(</span><span class="s3">&quot;form-action&quot;</span><span class="s1">)</span>
+    <span class="s1">frame_ancestors = csp_property(</span><span class="s3">&quot;frame-ancestors&quot;</span><span class="s1">)</span>
+    <span class="s1">frame_src = csp_property(</span><span class="s3">&quot;frame-src&quot;</span><span class="s1">)</span>
+    <span class="s1">img_src = csp_property(</span><span class="s3">&quot;img-src&quot;</span><span class="s1">)</span>
+    <span class="s1">manifest_src = csp_property(</span><span class="s3">&quot;manifest-src&quot;</span><span class="s1">)</span>
+    <span class="s1">media_src = csp_property(</span><span class="s3">&quot;media-src&quot;</span><span class="s1">)</span>
+    <span class="s1">navigate_to = csp_property(</span><span class="s3">&quot;navigate-to&quot;</span><span class="s1">)</span>
+    <span class="s1">object_src = csp_property(</span><span class="s3">&quot;object-src&quot;</span><span class="s1">)</span>
+    <span class="s1">prefetch_src = csp_property(</span><span class="s3">&quot;prefetch-src&quot;</span><span class="s1">)</span>
+    <span class="s1">plugin_types = csp_property(</span><span class="s3">&quot;plugin-types&quot;</span><span class="s1">)</span>
+    <span class="s1">report_to = csp_property(</span><span class="s3">&quot;report-to&quot;</span><span class="s1">)</span>
+    <span class="s1">report_uri = csp_property(</span><span class="s3">&quot;report-uri&quot;</span><span class="s1">)</span>
+    <span class="s1">sandbox = csp_property(</span><span class="s3">&quot;sandbox&quot;</span><span class="s1">)</span>
+    <span class="s1">script_src = csp_property(</span><span class="s3">&quot;script-src&quot;</span><span class="s1">)</span>
+    <span class="s1">script_src_attr = csp_property(</span><span class="s3">&quot;script-src-attr&quot;</span><span class="s1">)</span>
+    <span class="s1">script_src_elem = csp_property(</span><span class="s3">&quot;script-src-elem&quot;</span><span class="s1">)</span>
+    <span class="s1">style_src = csp_property(</span><span class="s3">&quot;style-src&quot;</span><span class="s1">)</span>
+    <span class="s1">style_src_attr = csp_property(</span><span class="s3">&quot;style-src-attr&quot;</span><span class="s1">)</span>
+    <span class="s1">style_src_elem = csp_property(</span><span class="s3">&quot;style-src-elem&quot;</span><span class="s1">)</span>
+    <span class="s1">worker_src = csp_property(</span><span class="s3">&quot;worker-src&quot;</span><span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">values=()</span><span class="s0">, </span><span class="s1">on_update=</span><span class="s0">None</span><span class="s1">):</span>
+        <span class="s1">dict.__init__(self</span><span class="s0">, </span><span class="s1">values </span><span class="s0">or </span><span class="s1">())</span>
+        <span class="s1">self.on_update = on_update</span>
+        <span class="s1">self.provided = values </span><span class="s0">is not None</span>
+
+    <span class="s0">def </span><span class="s1">_get_value(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s2">&quot;&quot;&quot;Used internally by the accessor properties.&quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self.get(key)</span>
+
+    <span class="s0">def </span><span class="s1">_set_value(self</span><span class="s0">, </span><span class="s1">key</span><span class="s0">, </span><span class="s1">value):</span>
+        <span class="s2">&quot;&quot;&quot;Used internally by the accessor properties.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">value </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s1">self.pop(key</span><span class="s0">, None</span><span class="s1">)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">self[key] = value</span>
+
+    <span class="s0">def </span><span class="s1">_del_value(self</span><span class="s0">, </span><span class="s1">key):</span>
+        <span class="s2">&quot;&quot;&quot;Used internally by the accessor properties.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">key </span><span class="s0">in </span><span class="s1">self:</span>
+            <span class="s0">del </span><span class="s1">self[key]</span>
+
+    <span class="s0">def </span><span class="s1">to_header(self):</span>
+        <span class="s2">&quot;&quot;&quot;Convert the stored values into a cache control header.&quot;&quot;&quot;</span>
+        <span class="s0">from </span><span class="s1">..http </span><span class="s0">import </span><span class="s1">dump_csp_header</span>
+
+        <span class="s0">return </span><span class="s1">dump_csp_header(self)</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self):</span>
+        <span class="s0">return </span><span class="s1">self.to_header()</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self):</span>
+        <span class="s1">kv_str = </span><span class="s3">&quot; &quot;</span><span class="s1">.join(</span><span class="s3">f&quot;</span><span class="s0">{</span><span class="s1">k</span><span class="s0">}</span><span class="s3">=</span><span class="s0">{</span><span class="s1">v</span><span class="s0">!r}</span><span class="s3">&quot; </span><span class="s0">for </span><span class="s1">k</span><span class="s0">, </span><span class="s1">v </span><span class="s0">in </span><span class="s1">sorted(self.items()))</span>
+        <span class="s0">return </span><span class="s3">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">kv_str</span><span class="s0">}</span><span class="s3">&gt;&quot;</span>
+</pre>
+</body>
+</html>

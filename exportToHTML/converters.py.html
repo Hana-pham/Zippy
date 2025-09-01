@@ -1,0 +1,283 @@
+<html>
+<head>
+<title>converters.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+.s5 { color: #808080;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+converters.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">import </span><span class="s1">re</span>
+<span class="s0">import </span><span class="s1">typing </span><span class="s0">as </span><span class="s1">t</span>
+<span class="s0">import </span><span class="s1">uuid</span>
+<span class="s0">from </span><span class="s1">urllib.parse </span><span class="s0">import </span><span class="s1">quote</span>
+
+<span class="s0">if </span><span class="s1">t.TYPE_CHECKING:</span>
+    <span class="s0">from </span><span class="s1">.map </span><span class="s0">import </span><span class="s1">Map</span>
+
+
+<span class="s0">class </span><span class="s1">ValidationError(ValueError):</span>
+    <span class="s2">&quot;&quot;&quot;Validation error.  If a rule converter raises this exception the rule 
+    does not match the current URL and the next URL is tried. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">BaseConverter:</span>
+    <span class="s2">&quot;&quot;&quot;Base class for all converters. 
+ 
+    .. versionchanged:: 2.3 
+        ``part_isolating`` defaults to ``False`` if ``regex`` contains a ``/``. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">regex = </span><span class="s3">&quot;[^/]+&quot;</span>
+    <span class="s1">weight = </span><span class="s4">100</span>
+    <span class="s1">part_isolating = </span><span class="s0">True</span>
+
+    <span class="s0">def </span><span class="s1">__init_subclass__(cls</span><span class="s0">, </span><span class="s1">**kwargs: t.Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init_subclass__(**kwargs)</span>
+
+        <span class="s5"># If the converter isn't inheriting its regex, disable part_isolating by default</span>
+        <span class="s5"># if the regex contains a / character.</span>
+        <span class="s0">if </span><span class="s3">&quot;regex&quot; </span><span class="s0">in </span><span class="s1">cls.__dict__ </span><span class="s0">and </span><span class="s3">&quot;part_isolating&quot; </span><span class="s0">not in </span><span class="s1">cls.__dict__:</span>
+            <span class="s1">cls.part_isolating = </span><span class="s3">&quot;/&quot; </span><span class="s0">not in </span><span class="s1">cls.regex</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">map: Map</span><span class="s0">, </span><span class="s1">*args: t.Any</span><span class="s0">, </span><span class="s1">**kwargs: t.Any) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">self.map = map</span>
+
+    <span class="s0">def </span><span class="s1">to_python(self</span><span class="s0">, </span><span class="s1">value: str) -&gt; t.Any:</span>
+        <span class="s0">return </span><span class="s1">value</span>
+
+    <span class="s0">def </span><span class="s1">to_url(self</span><span class="s0">, </span><span class="s1">value: t.Any) -&gt; str:</span>
+        <span class="s5"># safe = https://url.spec.whatwg.org/#url-path-segment-string</span>
+        <span class="s0">return </span><span class="s1">quote(str(value)</span><span class="s0">, </span><span class="s1">safe=</span><span class="s3">&quot;!$&amp;'()*+,/:;=@&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">UnicodeConverter(BaseConverter):</span>
+    <span class="s2">&quot;&quot;&quot;This converter is the default converter and accepts any string but 
+    only one path segment.  Thus the string can not include a slash. 
+ 
+    This is the default validator. 
+ 
+    Example:: 
+ 
+        Rule('/pages/&lt;page&gt;'), 
+        Rule('/&lt;string(length=2):lang_code&gt;') 
+ 
+    :param map: the :class:`Map`. 
+    :param minlength: the minimum length of the string.  Must be greater 
+                      or equal 1. 
+    :param maxlength: the maximum length of the string. 
+    :param length: the exact length of the string. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">map: Map</span><span class="s0">,</span>
+        <span class="s1">minlength: int = </span><span class="s4">1</span><span class="s0">,</span>
+        <span class="s1">maxlength: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">length: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__(map)</span>
+        <span class="s0">if </span><span class="s1">length </span><span class="s0">is not None</span><span class="s1">:</span>
+            <span class="s1">length_regex = </span><span class="s3">f&quot;</span><span class="s0">{{{</span><span class="s1">int(length)</span><span class="s0">}}}</span><span class="s3">&quot;</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s0">if </span><span class="s1">maxlength </span><span class="s0">is None</span><span class="s1">:</span>
+                <span class="s1">maxlength_value = </span><span class="s3">&quot;&quot;</span>
+            <span class="s0">else</span><span class="s1">:</span>
+                <span class="s1">maxlength_value = str(int(maxlength))</span>
+            <span class="s1">length_regex = </span><span class="s3">f&quot;</span><span class="s0">{{{</span><span class="s1">int(minlength)</span><span class="s0">}</span><span class="s3">,</span><span class="s0">{</span><span class="s1">maxlength_value</span><span class="s0">}}}</span><span class="s3">&quot;</span>
+        <span class="s1">self.regex = </span><span class="s3">f&quot;[^/]</span><span class="s0">{</span><span class="s1">length_regex</span><span class="s0">}</span><span class="s3">&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">AnyConverter(BaseConverter):</span>
+    <span class="s2">&quot;&quot;&quot;Matches one of the items provided.  Items can either be Python 
+    identifiers or strings:: 
+ 
+        Rule('/&lt;any(about, help, imprint, class, &quot;foo,bar&quot;):page_name&gt;') 
+ 
+    :param map: the :class:`Map`. 
+    :param items: this function accepts the possible items as positional 
+                  arguments. 
+ 
+    .. versionchanged:: 2.2 
+        Value is validated when building a URL. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">map: Map</span><span class="s0">, </span><span class="s1">*items: str) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__(map)</span>
+        <span class="s1">self.items = set(items)</span>
+        <span class="s1">self.regex = </span><span class="s3">f&quot;(?:</span><span class="s0">{</span><span class="s3">'|'</span><span class="s1">.join([re.escape(x) </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">items])</span><span class="s0">}</span><span class="s3">)&quot;</span>
+
+    <span class="s0">def </span><span class="s1">to_url(self</span><span class="s0">, </span><span class="s1">value: t.Any) -&gt; str:</span>
+        <span class="s0">if </span><span class="s1">value </span><span class="s0">in </span><span class="s1">self.items:</span>
+            <span class="s0">return </span><span class="s1">str(value)</span>
+
+        <span class="s1">valid_values = </span><span class="s3">&quot;, &quot;</span><span class="s1">.join(</span><span class="s3">f&quot;'</span><span class="s0">{</span><span class="s1">item</span><span class="s0">}</span><span class="s3">'&quot; </span><span class="s0">for </span><span class="s1">item </span><span class="s0">in </span><span class="s1">sorted(self.items))</span>
+        <span class="s0">raise </span><span class="s1">ValueError(</span><span class="s3">f&quot;'</span><span class="s0">{</span><span class="s1">value</span><span class="s0">}</span><span class="s3">' is not one of </span><span class="s0">{</span><span class="s1">valid_values</span><span class="s0">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+
+<span class="s0">class </span><span class="s1">PathConverter(BaseConverter):</span>
+    <span class="s2">&quot;&quot;&quot;Like the default :class:`UnicodeConverter`, but it also matches 
+    slashes.  This is useful for wikis and similar applications:: 
+ 
+        Rule('/&lt;path:wikipage&gt;') 
+        Rule('/&lt;path:wikipage&gt;/edit') 
+ 
+    :param map: the :class:`Map`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">part_isolating = </span><span class="s0">False</span>
+    <span class="s1">regex = </span><span class="s3">&quot;[^/].*?&quot;</span>
+    <span class="s1">weight = </span><span class="s4">200</span>
+
+
+<span class="s0">class </span><span class="s1">NumberConverter(BaseConverter):</span>
+    <span class="s2">&quot;&quot;&quot;Baseclass for `IntegerConverter` and `FloatConverter`. 
+ 
+    :internal: 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">weight = </span><span class="s4">50</span>
+    <span class="s1">num_convert: t.Callable = int</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">map: Map</span><span class="s0">,</span>
+        <span class="s1">fixed_digits: int = </span><span class="s4">0</span><span class="s0">,</span>
+        <span class="s1">min: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">max: int | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">signed: bool = </span><span class="s0">False,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s0">if </span><span class="s1">signed:</span>
+            <span class="s1">self.regex = self.signed_regex</span>
+        <span class="s1">super().__init__(map)</span>
+        <span class="s1">self.fixed_digits = fixed_digits</span>
+        <span class="s1">self.min = min</span>
+        <span class="s1">self.max = max</span>
+        <span class="s1">self.signed = signed</span>
+
+    <span class="s0">def </span><span class="s1">to_python(self</span><span class="s0">, </span><span class="s1">value: str) -&gt; t.Any:</span>
+        <span class="s0">if </span><span class="s1">self.fixed_digits </span><span class="s0">and </span><span class="s1">len(value) != self.fixed_digits:</span>
+            <span class="s0">raise </span><span class="s1">ValidationError()</span>
+        <span class="s1">value = self.num_convert(value)</span>
+        <span class="s0">if </span><span class="s1">(self.min </span><span class="s0">is not None and </span><span class="s1">value &lt; self.min) </span><span class="s0">or </span><span class="s1">(</span>
+            <span class="s1">self.max </span><span class="s0">is not None and </span><span class="s1">value &gt; self.max</span>
+        <span class="s1">):</span>
+            <span class="s0">raise </span><span class="s1">ValidationError()</span>
+        <span class="s0">return </span><span class="s1">value</span>
+
+    <span class="s0">def </span><span class="s1">to_url(self</span><span class="s0">, </span><span class="s1">value: t.Any) -&gt; str:</span>
+        <span class="s1">value = str(self.num_convert(value))</span>
+        <span class="s0">if </span><span class="s1">self.fixed_digits:</span>
+            <span class="s1">value = value.zfill(self.fixed_digits)</span>
+        <span class="s0">return </span><span class="s1">value</span>
+
+    <span class="s1">@property</span>
+    <span class="s0">def </span><span class="s1">signed_regex(self) -&gt; str:</span>
+        <span class="s0">return </span><span class="s3">f&quot;-?</span><span class="s0">{</span><span class="s1">self.regex</span><span class="s0">}</span><span class="s3">&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">IntegerConverter(NumberConverter):</span>
+    <span class="s2">&quot;&quot;&quot;This converter only accepts integer values:: 
+ 
+        Rule(&quot;/page/&lt;int:page&gt;&quot;) 
+ 
+    By default it only accepts unsigned, positive values. The ``signed`` 
+    parameter will enable signed, negative values. :: 
+ 
+        Rule(&quot;/page/&lt;int(signed=True):page&gt;&quot;) 
+ 
+    :param map: The :class:`Map`. 
+    :param fixed_digits: The number of fixed digits in the URL. If you 
+        set this to ``4`` for example, the rule will only match if the 
+        URL looks like ``/0001/``. The default is variable length. 
+    :param min: The minimal value. 
+    :param max: The maximal value. 
+    :param signed: Allow signed (negative) values. 
+ 
+    .. versionadded:: 0.15 
+        The ``signed`` parameter. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">regex = </span><span class="s3">r&quot;\d+&quot;</span>
+
+
+<span class="s0">class </span><span class="s1">FloatConverter(NumberConverter):</span>
+    <span class="s2">&quot;&quot;&quot;This converter only accepts floating point values:: 
+ 
+        Rule(&quot;/probability/&lt;float:probability&gt;&quot;) 
+ 
+    By default it only accepts unsigned, positive values. The ``signed`` 
+    parameter will enable signed, negative values. :: 
+ 
+        Rule(&quot;/offset/&lt;float(signed=True):offset&gt;&quot;) 
+ 
+    :param map: The :class:`Map`. 
+    :param min: The minimal value. 
+    :param max: The maximal value. 
+    :param signed: Allow signed (negative) values. 
+ 
+    .. versionadded:: 0.15 
+        The ``signed`` parameter. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">regex = </span><span class="s3">r&quot;\d+\.\d+&quot;</span>
+    <span class="s1">num_convert = float</span>
+
+    <span class="s0">def </span><span class="s1">__init__(</span>
+        <span class="s1">self</span><span class="s0">,</span>
+        <span class="s1">map: Map</span><span class="s0">,</span>
+        <span class="s1">min: float | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">max: float | </span><span class="s0">None </span><span class="s1">= </span><span class="s0">None,</span>
+        <span class="s1">signed: bool = </span><span class="s0">False,</span>
+    <span class="s1">) -&gt; </span><span class="s0">None</span><span class="s1">:</span>
+        <span class="s1">super().__init__(map</span><span class="s0">, </span><span class="s1">min=min</span><span class="s0">, </span><span class="s1">max=max</span><span class="s0">, </span><span class="s1">signed=signed)  </span><span class="s5"># type: ignore</span>
+
+
+<span class="s0">class </span><span class="s1">UUIDConverter(BaseConverter):</span>
+    <span class="s2">&quot;&quot;&quot;This converter only accepts UUID strings:: 
+ 
+        Rule('/object/&lt;uuid:identifier&gt;') 
+ 
+    .. versionadded:: 0.10 
+ 
+    :param map: the :class:`Map`. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s1">regex = (</span>
+        <span class="s3">r&quot;[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-&quot;</span>
+        <span class="s3">r&quot;[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}&quot;</span>
+    <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">to_python(self</span><span class="s0">, </span><span class="s1">value: str) -&gt; uuid.UUID:</span>
+        <span class="s0">return </span><span class="s1">uuid.UUID(value)</span>
+
+    <span class="s0">def </span><span class="s1">to_url(self</span><span class="s0">, </span><span class="s1">value: uuid.UUID) -&gt; str:</span>
+        <span class="s0">return </span><span class="s1">str(value)</span>
+
+
+<span class="s5">#: the default converter mapping for the map.</span>
+<span class="s1">DEFAULT_CONVERTERS: t.Mapping[str</span><span class="s0">, </span><span class="s1">type[BaseConverter]] = {</span>
+    <span class="s3">&quot;default&quot;</span><span class="s1">: UnicodeConverter</span><span class="s0">,</span>
+    <span class="s3">&quot;string&quot;</span><span class="s1">: UnicodeConverter</span><span class="s0">,</span>
+    <span class="s3">&quot;any&quot;</span><span class="s1">: AnyConverter</span><span class="s0">,</span>
+    <span class="s3">&quot;path&quot;</span><span class="s1">: PathConverter</span><span class="s0">,</span>
+    <span class="s3">&quot;int&quot;</span><span class="s1">: IntegerConverter</span><span class="s0">,</span>
+    <span class="s3">&quot;float&quot;</span><span class="s1">: FloatConverter</span><span class="s0">,</span>
+    <span class="s3">&quot;uuid&quot;</span><span class="s1">: UUIDConverter</span><span class="s0">,</span>
+<span class="s1">}</span>
+</pre>
+</body>
+</html>

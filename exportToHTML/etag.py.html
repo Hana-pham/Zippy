@@ -1,0 +1,116 @@
+<html>
+<head>
+<title>etag.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cc7832;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #629755; font-style: italic;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+etag.py</font>
+</center></td></tr></table>
+<pre><span class="s0">from </span><span class="s1">__future__ </span><span class="s0">import </span><span class="s1">annotations</span>
+
+<span class="s0">from </span><span class="s1">collections.abc </span><span class="s0">import </span><span class="s1">Collection</span>
+
+
+<span class="s0">class </span><span class="s1">ETags(Collection):</span>
+    <span class="s2">&quot;&quot;&quot;A set that can be used to check if one etag is present in a collection 
+    of etags. 
+    &quot;&quot;&quot;</span>
+
+    <span class="s0">def </span><span class="s1">__init__(self</span><span class="s0">, </span><span class="s1">strong_etags=</span><span class="s0">None, </span><span class="s1">weak_etags=</span><span class="s0">None, </span><span class="s1">star_tag=</span><span class="s0">False</span><span class="s1">):</span>
+        <span class="s0">if not </span><span class="s1">star_tag </span><span class="s0">and </span><span class="s1">strong_etags:</span>
+            <span class="s1">self._strong = frozenset(strong_etags)</span>
+        <span class="s0">else</span><span class="s1">:</span>
+            <span class="s1">self._strong = frozenset()</span>
+
+        <span class="s1">self._weak = frozenset(weak_etags </span><span class="s0">or </span><span class="s1">())</span>
+        <span class="s1">self.star_tag = star_tag</span>
+
+    <span class="s0">def </span><span class="s1">as_set(self</span><span class="s0">, </span><span class="s1">include_weak=</span><span class="s0">False</span><span class="s1">):</span>
+        <span class="s2">&quot;&quot;&quot;Convert the `ETags` object into a python set.  Per default all the 
+        weak etags are not part of this set.&quot;&quot;&quot;</span>
+        <span class="s1">rv = set(self._strong)</span>
+        <span class="s0">if </span><span class="s1">include_weak:</span>
+            <span class="s1">rv.update(self._weak)</span>
+        <span class="s0">return </span><span class="s1">rv</span>
+
+    <span class="s0">def </span><span class="s1">is_weak(self</span><span class="s0">, </span><span class="s1">etag):</span>
+        <span class="s2">&quot;&quot;&quot;Check if an etag is weak.&quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">etag </span><span class="s0">in </span><span class="s1">self._weak</span>
+
+    <span class="s0">def </span><span class="s1">is_strong(self</span><span class="s0">, </span><span class="s1">etag):</span>
+        <span class="s2">&quot;&quot;&quot;Check if an etag is strong.&quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">etag </span><span class="s0">in </span><span class="s1">self._strong</span>
+
+    <span class="s0">def </span><span class="s1">contains_weak(self</span><span class="s0">, </span><span class="s1">etag):</span>
+        <span class="s2">&quot;&quot;&quot;Check if an etag is part of the set including weak and strong tags.&quot;&quot;&quot;</span>
+        <span class="s0">return </span><span class="s1">self.is_weak(etag) </span><span class="s0">or </span><span class="s1">self.contains(etag)</span>
+
+    <span class="s0">def </span><span class="s1">contains(self</span><span class="s0">, </span><span class="s1">etag):</span>
+        <span class="s2">&quot;&quot;&quot;Check if an etag is part of the set ignoring weak tags. 
+        It is also possible to use the ``in`` operator. 
+        &quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self.star_tag:</span>
+            <span class="s0">return True</span>
+        <span class="s0">return </span><span class="s1">self.is_strong(etag)</span>
+
+    <span class="s0">def </span><span class="s1">contains_raw(self</span><span class="s0">, </span><span class="s1">etag):</span>
+        <span class="s2">&quot;&quot;&quot;When passed a quoted tag it will check if this tag is part of the 
+        set.  If the tag is weak it is checked against weak and strong tags, 
+        otherwise strong only.&quot;&quot;&quot;</span>
+        <span class="s0">from </span><span class="s1">..http </span><span class="s0">import </span><span class="s1">unquote_etag</span>
+
+        <span class="s1">etag</span><span class="s0">, </span><span class="s1">weak = unquote_etag(etag)</span>
+        <span class="s0">if </span><span class="s1">weak:</span>
+            <span class="s0">return </span><span class="s1">self.contains_weak(etag)</span>
+        <span class="s0">return </span><span class="s1">self.contains(etag)</span>
+
+    <span class="s0">def </span><span class="s1">to_header(self):</span>
+        <span class="s2">&quot;&quot;&quot;Convert the etags set into a HTTP header string.&quot;&quot;&quot;</span>
+        <span class="s0">if </span><span class="s1">self.star_tag:</span>
+            <span class="s0">return </span><span class="s3">&quot;*&quot;</span>
+        <span class="s0">return </span><span class="s3">&quot;, &quot;</span><span class="s1">.join(</span>
+            <span class="s1">[</span><span class="s3">f'&quot;</span><span class="s0">{</span><span class="s1">x</span><span class="s0">}</span><span class="s3">&quot;' </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">self._strong] + [</span><span class="s3">f'W/&quot;</span><span class="s0">{</span><span class="s1">x</span><span class="s0">}</span><span class="s3">&quot;' </span><span class="s0">for </span><span class="s1">x </span><span class="s0">in </span><span class="s1">self._weak]</span>
+        <span class="s1">)</span>
+
+    <span class="s0">def </span><span class="s1">__call__(self</span><span class="s0">, </span><span class="s1">etag=</span><span class="s0">None, </span><span class="s1">data=</span><span class="s0">None, </span><span class="s1">include_weak=</span><span class="s0">False</span><span class="s1">):</span>
+        <span class="s0">if </span><span class="s1">[etag</span><span class="s0">, </span><span class="s1">data].count(</span><span class="s0">None</span><span class="s1">) != </span><span class="s4">1</span><span class="s1">:</span>
+            <span class="s0">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;either tag or data required, but at least one&quot;</span><span class="s1">)</span>
+        <span class="s0">if </span><span class="s1">etag </span><span class="s0">is None</span><span class="s1">:</span>
+            <span class="s0">from </span><span class="s1">..http </span><span class="s0">import </span><span class="s1">generate_etag</span>
+
+            <span class="s1">etag = generate_etag(data)</span>
+        <span class="s0">if </span><span class="s1">include_weak:</span>
+            <span class="s0">if </span><span class="s1">etag </span><span class="s0">in </span><span class="s1">self._weak:</span>
+                <span class="s0">return True</span>
+        <span class="s0">return </span><span class="s1">etag </span><span class="s0">in </span><span class="s1">self._strong</span>
+
+    <span class="s0">def </span><span class="s1">__bool__(self):</span>
+        <span class="s0">return </span><span class="s1">bool(self.star_tag </span><span class="s0">or </span><span class="s1">self._strong </span><span class="s0">or </span><span class="s1">self._weak)</span>
+
+    <span class="s0">def </span><span class="s1">__str__(self):</span>
+        <span class="s0">return </span><span class="s1">self.to_header()</span>
+
+    <span class="s0">def </span><span class="s1">__len__(self):</span>
+        <span class="s0">return </span><span class="s1">len(self._strong)</span>
+
+    <span class="s0">def </span><span class="s1">__iter__(self):</span>
+        <span class="s0">return </span><span class="s1">iter(self._strong)</span>
+
+    <span class="s0">def </span><span class="s1">__contains__(self</span><span class="s0">, </span><span class="s1">etag):</span>
+        <span class="s0">return </span><span class="s1">self.contains(etag)</span>
+
+    <span class="s0">def </span><span class="s1">__repr__(self):</span>
+        <span class="s0">return </span><span class="s3">f&quot;&lt;</span><span class="s0">{</span><span class="s1">type(self).__name__</span><span class="s0">} {</span><span class="s1">str(self)</span><span class="s0">!r}</span><span class="s3">&gt;&quot;</span>
+</pre>
+</body>
+</html>

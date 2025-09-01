@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Display Screens</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Libre+Baskerville:wght@400;700&family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+        <link rel="stylesheet" href="{{ url_for('static', filename='displaycss.css') }}">
+     <!-- DataTables CSS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.min.css">
+
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="{{ url_for('static', filename='displayJS.js') }}"></script>
+    <!-- DataTables JS -->
+    <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/2.0.8/js/dataTables.bootstrap5.js"></script>
+    <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/2.0.8/js/dataTables.js"></script>
+    <script type="text/javascript" charset="utf8" src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+
+
+    <script>
+        $(document).ready(function() {
+            $('#example').DataTable();
+        });
+    </script>
+
+</head>
+<body>
+    <header id="backToIndex" class="text-center my-5">
+        <div class="container">
+            <div class="row align-items-center header-content">
+                <div class="col-3 col-sm-2 text-left">
+                    <img src="{{ url_for('static', filename='images/thinkgrid-logo.png') }}" alt="ThinkGrid Logo" class="header-logo">
+                </div>
+                <div class="col-6 col-sm-8 text-center">
+                    <h1  class="font-libre-baskerville zippy-header">Zippy</h1>
+                </div>
+                <div class="col-3 col-sm-2 text-right">
+                    <span class="header-subtext">zippy_screens_detector</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+
+    <!-- The images display part-->
+       <main class="container text-center">
+        <h2 class="mt-5 font-weight-bold">Results</h2>
+        <h3 class="mt-1">Here are what we detected 🔎</h3>
+        <div class="showsScreens d-flex align-items-center justify-content-center">
+            <h6>
+                <img src="{{ url_for('static', filename='images/return.png') }}" alt="The logo for hide the screen or display" class="return_img">
+                Screens
+            </h6>
+            <div class="btn-container">
+                <button type="button" id="download" class="btn btn-success">Download</button>
+                <button type="button" id="showCode" class="btn btn-outline-secondary">Generate Code 🚀</button>
+                <button type="button" id="backToIndex" class="btn btn-outline-secondary">Back to Home</button>
+            </div>
+        </div>
+        <!-- Screens container -->
+        <table id="screensContainer" class="display table table-striped table-bordered nowrap" style="width:100%">
+            <thead>
+                <tr>
+                    <th>Thumbnail</th>
+                    <th>Variations</th>
+                    <th>Screen</th>
+                    <th>Select</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </main>
+
+    <footer class="text-center mt-5 py-4 bg-dark text-white">
+        <!-- Your existing footer content here... -->
+    </footer>
+
+    <!-- Image Modal -->
+    <div class="modal fade" id="imageModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="imageModalLabel">Screen Preview</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body text-center">
+            <img src="" alt="Screen Preview" class="img-fluid">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Variations Modal -->
+    <div class="modal fade" id="variationsModal" tabindex="-1" aria-labelledby="variationsModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="variationsModalLabel">Variations</h5>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <table id="variationsTable" class="display" style="width:100%">
+              <thead>
+                <tr>
+                  <th>Variation</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+<input type="hidden" id="currentScreenIndex" name="currentScreenIndex">
+</body>
+</html>>

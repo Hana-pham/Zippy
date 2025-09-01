@@ -1,0 +1,298 @@
+<html>
+<head>
+<title>base.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #629755; font-style: italic;}
+.s5 { color: #6897bb;}
+.s6 { color: #a5c261;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+base.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s2">import </span><span class="s1">io</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">signal</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">time</span>
+<span class="s2">import </span><span class="s1">traceback</span>
+<span class="s2">from </span><span class="s1">datetime </span><span class="s2">import </span><span class="s1">datetime</span>
+<span class="s2">from </span><span class="s1">random </span><span class="s2">import </span><span class="s1">randint</span>
+<span class="s2">from </span><span class="s1">ssl </span><span class="s2">import </span><span class="s1">SSLError</span>
+
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">util</span>
+<span class="s2">from </span><span class="s1">gunicorn.http.errors </span><span class="s2">import </span><span class="s1">(</span>
+    <span class="s1">ForbiddenProxyRequest</span><span class="s2">, </span><span class="s1">InvalidHeader</span><span class="s2">,</span>
+    <span class="s1">InvalidHeaderName</span><span class="s2">, </span><span class="s1">InvalidHTTPVersion</span><span class="s2">,</span>
+    <span class="s1">InvalidProxyLine</span><span class="s2">, </span><span class="s1">InvalidRequestLine</span><span class="s2">,</span>
+    <span class="s1">InvalidRequestMethod</span><span class="s2">, </span><span class="s1">InvalidSchemeHeaders</span><span class="s2">,</span>
+    <span class="s1">LimitRequestHeaders</span><span class="s2">, </span><span class="s1">LimitRequestLine</span><span class="s2">,</span>
+<span class="s1">)</span>
+<span class="s2">from </span><span class="s1">gunicorn.http.wsgi </span><span class="s2">import </span><span class="s1">Response</span><span class="s2">, </span><span class="s1">default_environ</span>
+<span class="s2">from </span><span class="s1">gunicorn.reloader </span><span class="s2">import </span><span class="s1">reloader_engines</span>
+<span class="s2">from </span><span class="s1">gunicorn.workers.workertmp </span><span class="s2">import </span><span class="s1">WorkerTmp</span>
+
+
+<span class="s2">class </span><span class="s1">Worker(object):</span>
+
+    <span class="s1">SIGNALS = [getattr(signal</span><span class="s2">, </span><span class="s3">&quot;SIG%s&quot; </span><span class="s1">% x) </span><span class="s2">for </span><span class="s1">x </span><span class="s2">in </span><span class="s1">(</span>
+        <span class="s3">&quot;ABRT HUP QUIT INT TERM USR1 USR2 WINCH CHLD&quot;</span><span class="s1">.split()</span>
+    <span class="s1">)]</span>
+
+    <span class="s1">PIPE = []</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">age</span><span class="s2">, </span><span class="s1">ppid</span><span class="s2">, </span><span class="s1">sockets</span><span class="s2">, </span><span class="s1">app</span><span class="s2">, </span><span class="s1">timeout</span><span class="s2">, </span><span class="s1">cfg</span><span class="s2">, </span><span class="s1">log):</span>
+        <span class="s4">&quot;&quot;&quot;\ 
+        This is called pre-fork so it shouldn't do anything to the 
+        current process. If there's a need to make process wide 
+        changes you'll want to do that in ``self.init_process()``. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.age = age</span>
+        <span class="s1">self.pid = </span><span class="s3">&quot;[booting]&quot;</span>
+        <span class="s1">self.ppid = ppid</span>
+        <span class="s1">self.sockets = sockets</span>
+        <span class="s1">self.app = app</span>
+        <span class="s1">self.timeout = timeout</span>
+        <span class="s1">self.cfg = cfg</span>
+        <span class="s1">self.booted = </span><span class="s2">False</span>
+        <span class="s1">self.aborted = </span><span class="s2">False</span>
+        <span class="s1">self.reloader = </span><span class="s2">None</span>
+
+        <span class="s1">self.nr = </span><span class="s5">0</span>
+
+        <span class="s2">if </span><span class="s1">cfg.max_requests &gt; </span><span class="s5">0</span><span class="s1">:</span>
+            <span class="s1">jitter = randint(</span><span class="s5">0</span><span class="s2">, </span><span class="s1">cfg.max_requests_jitter)</span>
+            <span class="s1">self.max_requests = cfg.max_requests + jitter</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s1">self.max_requests = sys.maxsize</span>
+
+        <span class="s1">self.alive = </span><span class="s2">True</span>
+        <span class="s1">self.log = log</span>
+        <span class="s1">self.tmp = WorkerTmp(cfg)</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;&lt;Worker %s&gt;&quot; </span><span class="s1">% self.pid</span>
+
+    <span class="s2">def </span><span class="s1">notify(self):</span>
+        <span class="s4">&quot;&quot;&quot;\ 
+        Your worker subclass must arrange to have this method called 
+        once every ``self.timeout`` seconds. If you fail in accomplishing 
+        this task, the master process will murder your workers. 
+        &quot;&quot;&quot;</span>
+        <span class="s1">self.tmp.notify()</span>
+
+    <span class="s2">def </span><span class="s1">run(self):</span>
+        <span class="s4">&quot;&quot;&quot;\ 
+        This is the mainloop of a worker process. You should override 
+        this method in a subclass to provide the intended behaviour 
+        for your particular evil schemes. 
+        &quot;&quot;&quot;</span>
+        <span class="s2">raise </span><span class="s1">NotImplementedError()</span>
+
+    <span class="s2">def </span><span class="s1">init_process(self):</span>
+        <span class="s4">&quot;&quot;&quot;\ 
+        If you override this method in a subclass, the last statement 
+        in the function should be to call this method with 
+        super().init_process() so that the ``run()`` loop is initiated. 
+        &quot;&quot;&quot;</span>
+
+        <span class="s0"># set environment' variables</span>
+        <span class="s2">if </span><span class="s1">self.cfg.env:</span>
+            <span class="s2">for </span><span class="s1">k</span><span class="s2">, </span><span class="s1">v </span><span class="s2">in </span><span class="s1">self.cfg.env.items():</span>
+                <span class="s1">os.environ[k] = v</span>
+
+        <span class="s1">util.set_owner_process(self.cfg.uid</span><span class="s2">, </span><span class="s1">self.cfg.gid</span><span class="s2">,</span>
+                               <span class="s1">initgroups=self.cfg.initgroups)</span>
+
+        <span class="s0"># Reseed the random number generator</span>
+        <span class="s1">util.seed()</span>
+
+        <span class="s0"># For waking ourselves up</span>
+        <span class="s1">self.PIPE = os.pipe()</span>
+        <span class="s2">for </span><span class="s1">p </span><span class="s2">in </span><span class="s1">self.PIPE:</span>
+            <span class="s1">util.set_non_blocking(p)</span>
+            <span class="s1">util.close_on_exec(p)</span>
+
+        <span class="s0"># Prevent fd inheritance</span>
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.sockets:</span>
+            <span class="s1">util.close_on_exec(s)</span>
+        <span class="s1">util.close_on_exec(self.tmp.fileno())</span>
+
+        <span class="s1">self.wait_fds = self.sockets + [self.PIPE[</span><span class="s5">0</span><span class="s1">]]</span>
+
+        <span class="s1">self.log.close_on_exec()</span>
+
+        <span class="s1">self.init_signals()</span>
+
+        <span class="s0"># start the reloader</span>
+        <span class="s2">if </span><span class="s1">self.cfg.reload:</span>
+            <span class="s2">def </span><span class="s1">changed(fname):</span>
+                <span class="s1">self.log.info(</span><span class="s3">&quot;Worker reloading: %s modified&quot;</span><span class="s2">, </span><span class="s1">fname)</span>
+                <span class="s1">self.alive = </span><span class="s2">False</span>
+                <span class="s1">os.write(self.PIPE[</span><span class="s5">1</span><span class="s1">]</span><span class="s2">, </span><span class="s6">b&quot;1&quot;</span><span class="s1">)</span>
+                <span class="s1">self.cfg.worker_int(self)</span>
+                <span class="s1">time.sleep(</span><span class="s5">0.1</span><span class="s1">)</span>
+                <span class="s1">sys.exit(</span><span class="s5">0</span><span class="s1">)</span>
+
+            <span class="s1">reloader_cls = reloader_engines[self.cfg.reload_engine]</span>
+            <span class="s1">self.reloader = reloader_cls(extra_files=self.cfg.reload_extra_files</span><span class="s2">,</span>
+                                         <span class="s1">callback=changed)</span>
+
+        <span class="s1">self.load_wsgi()</span>
+        <span class="s2">if </span><span class="s1">self.reloader:</span>
+            <span class="s1">self.reloader.start()</span>
+
+        <span class="s1">self.cfg.post_worker_init(self)</span>
+
+        <span class="s0"># Enter main run loop</span>
+        <span class="s1">self.booted = </span><span class="s2">True</span>
+        <span class="s1">self.run()</span>
+
+    <span class="s2">def </span><span class="s1">load_wsgi(self):</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">self.wsgi = self.app.wsgi()</span>
+        <span class="s2">except </span><span class="s1">SyntaxError </span><span class="s2">as </span><span class="s1">e:</span>
+            <span class="s2">if not </span><span class="s1">self.cfg.reload:</span>
+                <span class="s2">raise</span>
+
+            <span class="s1">self.log.exception(e)</span>
+
+            <span class="s0"># fix from PR #1228</span>
+            <span class="s0"># storing the traceback into exc_tb will create a circular reference.</span>
+            <span class="s0"># per https://docs.python.org/2/library/sys.html#sys.exc_info warning,</span>
+            <span class="s0"># delete the traceback after use.</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">_</span><span class="s2">, </span><span class="s1">exc_val</span><span class="s2">, </span><span class="s1">exc_tb = sys.exc_info()</span>
+                <span class="s1">self.reloader.add_extra_file(exc_val.filename)</span>
+
+                <span class="s1">tb_string = io.StringIO()</span>
+                <span class="s1">traceback.print_tb(exc_tb</span><span class="s2">, </span><span class="s1">file=tb_string)</span>
+                <span class="s1">self.wsgi = util.make_fail_app(tb_string.getvalue())</span>
+            <span class="s2">finally</span><span class="s1">:</span>
+                <span class="s2">del </span><span class="s1">exc_tb</span>
+
+    <span class="s2">def </span><span class="s1">init_signals(self):</span>
+        <span class="s0"># reset signaling</span>
+        <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">self.SIGNALS:</span>
+            <span class="s1">signal.signal(s</span><span class="s2">, </span><span class="s1">signal.SIG_DFL)</span>
+        <span class="s0"># init new signaling</span>
+        <span class="s1">signal.signal(signal.SIGQUIT</span><span class="s2">, </span><span class="s1">self.handle_quit)</span>
+        <span class="s1">signal.signal(signal.SIGTERM</span><span class="s2">, </span><span class="s1">self.handle_exit)</span>
+        <span class="s1">signal.signal(signal.SIGINT</span><span class="s2">, </span><span class="s1">self.handle_quit)</span>
+        <span class="s1">signal.signal(signal.SIGWINCH</span><span class="s2">, </span><span class="s1">self.handle_winch)</span>
+        <span class="s1">signal.signal(signal.SIGUSR1</span><span class="s2">, </span><span class="s1">self.handle_usr1)</span>
+        <span class="s1">signal.signal(signal.SIGABRT</span><span class="s2">, </span><span class="s1">self.handle_abort)</span>
+
+        <span class="s0"># Don't let SIGTERM and SIGUSR1 disturb active requests</span>
+        <span class="s0"># by interrupting system calls</span>
+        <span class="s1">signal.siginterrupt(signal.SIGTERM</span><span class="s2">, False</span><span class="s1">)</span>
+        <span class="s1">signal.siginterrupt(signal.SIGUSR1</span><span class="s2">, False</span><span class="s1">)</span>
+
+        <span class="s2">if </span><span class="s1">hasattr(signal</span><span class="s2">, </span><span class="s3">'set_wakeup_fd'</span><span class="s1">):</span>
+            <span class="s1">signal.set_wakeup_fd(self.PIPE[</span><span class="s5">1</span><span class="s1">])</span>
+
+    <span class="s2">def </span><span class="s1">handle_usr1(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">self.log.reopen_files()</span>
+
+    <span class="s2">def </span><span class="s1">handle_exit(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">self.alive = </span><span class="s2">False</span>
+
+    <span class="s2">def </span><span class="s1">handle_quit(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">self.alive = </span><span class="s2">False</span>
+        <span class="s0"># worker_int callback</span>
+        <span class="s1">self.cfg.worker_int(self)</span>
+        <span class="s1">time.sleep(</span><span class="s5">0.1</span><span class="s1">)</span>
+        <span class="s1">sys.exit(</span><span class="s5">0</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">handle_abort(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">frame):</span>
+        <span class="s1">self.alive = </span><span class="s2">False</span>
+        <span class="s1">self.cfg.worker_abort(self)</span>
+        <span class="s1">sys.exit(</span><span class="s5">1</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">handle_error(self</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">addr</span><span class="s2">, </span><span class="s1">exc):</span>
+        <span class="s1">request_start = datetime.now()</span>
+        <span class="s1">addr = addr </span><span class="s2">or </span><span class="s1">(</span><span class="s3">''</span><span class="s2">, </span><span class="s1">-</span><span class="s5">1</span><span class="s1">)  </span><span class="s0"># unix socket case</span>
+        <span class="s2">if </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">(</span>
+            <span class="s1">InvalidRequestLine</span><span class="s2">, </span><span class="s1">InvalidRequestMethod</span><span class="s2">,</span>
+            <span class="s1">InvalidHTTPVersion</span><span class="s2">, </span><span class="s1">InvalidHeader</span><span class="s2">, </span><span class="s1">InvalidHeaderName</span><span class="s2">,</span>
+            <span class="s1">LimitRequestLine</span><span class="s2">, </span><span class="s1">LimitRequestHeaders</span><span class="s2">,</span>
+            <span class="s1">InvalidProxyLine</span><span class="s2">, </span><span class="s1">ForbiddenProxyRequest</span><span class="s2">,</span>
+            <span class="s1">InvalidSchemeHeaders</span><span class="s2">,</span>
+            <span class="s1">SSLError</span><span class="s2">,</span>
+        <span class="s1">)):</span>
+
+            <span class="s1">status_int = </span><span class="s5">400</span>
+            <span class="s1">reason = </span><span class="s3">&quot;Bad Request&quot;</span>
+
+            <span class="s2">if </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">InvalidRequestLine):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;Invalid Request Line '%s'&quot; </span><span class="s1">% str(exc)</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">InvalidRequestMethod):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;Invalid Method '%s'&quot; </span><span class="s1">% str(exc)</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">InvalidHTTPVersion):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;Invalid HTTP Version '%s'&quot; </span><span class="s1">% str(exc)</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">(InvalidHeaderName</span><span class="s2">, </span><span class="s1">InvalidHeader</span><span class="s2">,</span><span class="s1">)):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;%s&quot; </span><span class="s1">% str(exc)</span>
+                <span class="s2">if not </span><span class="s1">req </span><span class="s2">and </span><span class="s1">hasattr(exc</span><span class="s2">, </span><span class="s3">&quot;req&quot;</span><span class="s1">):</span>
+                    <span class="s1">req = exc.req  </span><span class="s0"># for access log</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">LimitRequestLine):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;%s&quot; </span><span class="s1">% str(exc)</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">LimitRequestHeaders):</span>
+                <span class="s1">reason = </span><span class="s3">&quot;Request Header Fields Too Large&quot;</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;Error parsing headers: '%s'&quot; </span><span class="s1">% str(exc)</span>
+                <span class="s1">status_int = </span><span class="s5">431</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">InvalidProxyLine):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;'%s'&quot; </span><span class="s1">% str(exc)</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">ForbiddenProxyRequest):</span>
+                <span class="s1">reason = </span><span class="s3">&quot;Forbidden&quot;</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;Request forbidden&quot;</span>
+                <span class="s1">status_int = </span><span class="s5">403</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">InvalidSchemeHeaders):</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;%s&quot; </span><span class="s1">% str(exc)</span>
+            <span class="s2">elif </span><span class="s1">isinstance(exc</span><span class="s2">, </span><span class="s1">SSLError):</span>
+                <span class="s1">reason = </span><span class="s3">&quot;Forbidden&quot;</span>
+                <span class="s1">mesg = </span><span class="s3">&quot;'%s'&quot; </span><span class="s1">% str(exc)</span>
+                <span class="s1">status_int = </span><span class="s5">403</span>
+
+            <span class="s1">msg = </span><span class="s3">&quot;Invalid request from ip={ip}: {error}&quot;</span>
+            <span class="s1">self.log.warning(msg.format(ip=addr[</span><span class="s5">0</span><span class="s1">]</span><span class="s2">, </span><span class="s1">error=str(exc)))</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">if </span><span class="s1">hasattr(req</span><span class="s2">, </span><span class="s3">&quot;uri&quot;</span><span class="s1">):</span>
+                <span class="s1">self.log.exception(</span><span class="s3">&quot;Error handling request %s&quot;</span><span class="s2">, </span><span class="s1">req.uri)</span>
+            <span class="s1">status_int = </span><span class="s5">500</span>
+            <span class="s1">reason = </span><span class="s3">&quot;Internal Server Error&quot;</span>
+            <span class="s1">mesg = </span><span class="s3">&quot;&quot;</span>
+
+        <span class="s2">if </span><span class="s1">req </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">request_time = datetime.now() - request_start</span>
+            <span class="s1">environ = default_environ(req</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">self.cfg)</span>
+            <span class="s1">environ[</span><span class="s3">'REMOTE_ADDR'</span><span class="s1">] = addr[</span><span class="s5">0</span><span class="s1">]</span>
+            <span class="s1">environ[</span><span class="s3">'REMOTE_PORT'</span><span class="s1">] = str(addr[</span><span class="s5">1</span><span class="s1">])</span>
+            <span class="s1">resp = Response(req</span><span class="s2">, </span><span class="s1">client</span><span class="s2">, </span><span class="s1">self.cfg)</span>
+            <span class="s1">resp.status = </span><span class="s3">&quot;%s %s&quot; </span><span class="s1">% (status_int</span><span class="s2">, </span><span class="s1">reason)</span>
+            <span class="s1">resp.response_length = len(mesg)</span>
+            <span class="s1">self.log.access(resp</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">environ</span><span class="s2">, </span><span class="s1">request_time)</span>
+
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s1">util.write_error(client</span><span class="s2">, </span><span class="s1">status_int</span><span class="s2">, </span><span class="s1">reason</span><span class="s2">, </span><span class="s1">mesg)</span>
+        <span class="s2">except </span><span class="s1">Exception:</span>
+            <span class="s1">self.log.debug(</span><span class="s3">&quot;Failed to send error message.&quot;</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">handle_winch(self</span><span class="s2">, </span><span class="s1">sig</span><span class="s2">, </span><span class="s1">fname):</span>
+        <span class="s0"># Ignore SIGWINCH in worker. Fixes a crash on OpenBSD.</span>
+        <span class="s1">self.log.debug(</span><span class="s3">&quot;worker: SIGWINCH ignored.&quot;</span><span class="s1">)</span>
+</pre>
+</body>
+</html>

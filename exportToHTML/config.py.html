@@ -1,0 +1,2279 @@
+<html>
+<head>
+<title>config.py</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #808080;}
+.s1 { color: #a9b7c6;}
+.s2 { color: #cc7832;}
+.s3 { color: #6a8759;}
+.s4 { color: #6897bb;}
+</style>
+</head>
+<body bgcolor="#2b2b2b">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+config.py</font>
+</center></td></tr></table>
+<pre><span class="s0"># -*- coding: utf-8 -</span>
+<span class="s0">#</span>
+<span class="s0"># This file is part of gunicorn released under the MIT license.</span>
+<span class="s0"># See the NOTICE for more information.</span>
+
+<span class="s0"># Please remember to run &quot;make -C docs html&quot; after update &quot;desc&quot; attributes.</span>
+
+<span class="s2">import </span><span class="s1">argparse</span>
+<span class="s2">import </span><span class="s1">copy</span>
+<span class="s2">import </span><span class="s1">grp</span>
+<span class="s2">import </span><span class="s1">inspect</span>
+<span class="s2">import </span><span class="s1">os</span>
+<span class="s2">import </span><span class="s1">pwd</span>
+<span class="s2">import </span><span class="s1">re</span>
+<span class="s2">import </span><span class="s1">shlex</span>
+<span class="s2">import </span><span class="s1">ssl</span>
+<span class="s2">import </span><span class="s1">sys</span>
+<span class="s2">import </span><span class="s1">textwrap</span>
+
+<span class="s2">from </span><span class="s1">gunicorn </span><span class="s2">import </span><span class="s1">__version__</span><span class="s2">, </span><span class="s1">util</span>
+<span class="s2">from </span><span class="s1">gunicorn.errors </span><span class="s2">import </span><span class="s1">ConfigError</span>
+<span class="s2">from </span><span class="s1">gunicorn.reloader </span><span class="s2">import </span><span class="s1">reloader_engines</span>
+
+<span class="s1">KNOWN_SETTINGS = []</span>
+<span class="s1">PLATFORM = sys.platform</span>
+
+
+<span class="s2">def </span><span class="s1">make_settings(ignore=</span><span class="s2">None</span><span class="s1">):</span>
+    <span class="s1">settings = {}</span>
+    <span class="s1">ignore = ignore </span><span class="s2">or </span><span class="s1">()</span>
+    <span class="s2">for </span><span class="s1">s </span><span class="s2">in </span><span class="s1">KNOWN_SETTINGS:</span>
+        <span class="s1">setting = s()</span>
+        <span class="s2">if </span><span class="s1">setting.name </span><span class="s2">in </span><span class="s1">ignore:</span>
+            <span class="s2">continue</span>
+        <span class="s1">settings[setting.name] = setting.copy()</span>
+    <span class="s2">return </span><span class="s1">settings</span>
+
+
+<span class="s2">def </span><span class="s1">auto_int(_</span><span class="s2">, </span><span class="s1">x):</span>
+    <span class="s0"># for compatible with octal numbers in python3</span>
+    <span class="s2">if </span><span class="s1">re.match(</span><span class="s3">r'0(\d)'</span><span class="s2">, </span><span class="s1">x</span><span class="s2">, </span><span class="s1">re.IGNORECASE):</span>
+        <span class="s1">x = x.replace(</span><span class="s3">'0'</span><span class="s2">, </span><span class="s3">'0o'</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s2">return </span><span class="s1">int(x</span><span class="s2">, </span><span class="s4">0</span><span class="s1">)</span>
+
+
+<span class="s2">class </span><span class="s1">Config(object):</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self</span><span class="s2">, </span><span class="s1">usage=</span><span class="s2">None, </span><span class="s1">prog=</span><span class="s2">None</span><span class="s1">):</span>
+        <span class="s1">self.settings = make_settings()</span>
+        <span class="s1">self.usage = usage</span>
+        <span class="s1">self.prog = prog </span><span class="s2">or </span><span class="s1">os.path.basename(sys.argv[</span><span class="s4">0</span><span class="s1">])</span>
+        <span class="s1">self.env_orig = os.environ.copy()</span>
+
+    <span class="s2">def </span><span class="s1">__str__(self):</span>
+        <span class="s1">lines = []</span>
+        <span class="s1">kmax = max(len(k) </span><span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">self.settings)</span>
+        <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">sorted(self.settings):</span>
+            <span class="s1">v = self.settings[k].value</span>
+            <span class="s2">if </span><span class="s1">callable(v):</span>
+                <span class="s1">v = </span><span class="s3">&quot;&lt;{}()&gt;&quot;</span><span class="s1">.format(v.__qualname__)</span>
+            <span class="s1">lines.append(</span><span class="s3">&quot;{k:{kmax}} = {v}&quot;</span><span class="s1">.format(k=k</span><span class="s2">, </span><span class="s1">v=v</span><span class="s2">, </span><span class="s1">kmax=kmax))</span>
+        <span class="s2">return </span><span class="s3">&quot;</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">.join(lines)</span>
+
+    <span class="s2">def </span><span class="s1">__getattr__(self</span><span class="s2">, </span><span class="s1">name):</span>
+        <span class="s2">if </span><span class="s1">name </span><span class="s2">not in </span><span class="s1">self.settings:</span>
+            <span class="s2">raise </span><span class="s1">AttributeError(</span><span class="s3">&quot;No configuration setting for: %s&quot; </span><span class="s1">% name)</span>
+        <span class="s2">return </span><span class="s1">self.settings[name].get()</span>
+
+    <span class="s2">def </span><span class="s1">__setattr__(self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">value):</span>
+        <span class="s2">if </span><span class="s1">name != </span><span class="s3">&quot;settings&quot; </span><span class="s2">and </span><span class="s1">name </span><span class="s2">in </span><span class="s1">self.settings:</span>
+            <span class="s2">raise </span><span class="s1">AttributeError(</span><span class="s3">&quot;Invalid access!&quot;</span><span class="s1">)</span>
+        <span class="s1">super().__setattr__(name</span><span class="s2">, </span><span class="s1">value)</span>
+
+    <span class="s2">def </span><span class="s1">set(self</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">value):</span>
+        <span class="s2">if </span><span class="s1">name </span><span class="s2">not in </span><span class="s1">self.settings:</span>
+            <span class="s2">raise </span><span class="s1">AttributeError(</span><span class="s3">&quot;No configuration setting for: %s&quot; </span><span class="s1">% name)</span>
+        <span class="s1">self.settings[name].set(value)</span>
+
+    <span class="s2">def </span><span class="s1">get_cmd_args_from_env(self):</span>
+        <span class="s2">if </span><span class="s3">'GUNICORN_CMD_ARGS' </span><span class="s2">in </span><span class="s1">self.env_orig:</span>
+            <span class="s2">return </span><span class="s1">shlex.split(self.env_orig[</span><span class="s3">'GUNICORN_CMD_ARGS'</span><span class="s1">])</span>
+        <span class="s2">return </span><span class="s1">[]</span>
+
+    <span class="s2">def </span><span class="s1">parser(self):</span>
+        <span class="s1">kwargs = {</span>
+            <span class="s3">&quot;usage&quot;</span><span class="s1">: self.usage</span><span class="s2">,</span>
+            <span class="s3">&quot;prog&quot;</span><span class="s1">: self.prog</span>
+        <span class="s1">}</span>
+        <span class="s1">parser = argparse.ArgumentParser(**kwargs)</span>
+        <span class="s1">parser.add_argument(</span><span class="s3">&quot;-v&quot;</span><span class="s2">, </span><span class="s3">&quot;--version&quot;</span><span class="s2">,</span>
+                            <span class="s1">action=</span><span class="s3">&quot;version&quot;</span><span class="s2">, </span><span class="s1">default=argparse.SUPPRESS</span><span class="s2">,</span>
+                            <span class="s1">version=</span><span class="s3">&quot;%(prog)s (version &quot; </span><span class="s1">+ __version__ + </span><span class="s3">&quot;)</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s2">,</span>
+                            <span class="s1">help=</span><span class="s3">&quot;show program's version number and exit&quot;</span><span class="s1">)</span>
+        <span class="s1">parser.add_argument(</span><span class="s3">&quot;args&quot;</span><span class="s2">, </span><span class="s1">nargs=</span><span class="s3">&quot;*&quot;</span><span class="s2">, </span><span class="s1">help=argparse.SUPPRESS)</span>
+
+        <span class="s1">keys = sorted(self.settings</span><span class="s2">, </span><span class="s1">key=self.settings.__getitem__)</span>
+        <span class="s2">for </span><span class="s1">k </span><span class="s2">in </span><span class="s1">keys:</span>
+            <span class="s1">self.settings[k].add_option(parser)</span>
+
+        <span class="s2">return </span><span class="s1">parser</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">worker_class_str(self):</span>
+        <span class="s1">uri = self.settings[</span><span class="s3">'worker_class'</span><span class="s1">].get()</span>
+
+        <span class="s0"># are we using a threaded worker?</span>
+        <span class="s1">is_sync = uri.endswith(</span><span class="s3">'SyncWorker'</span><span class="s1">) </span><span class="s2">or </span><span class="s1">uri == </span><span class="s3">'sync'</span>
+        <span class="s2">if </span><span class="s1">is_sync </span><span class="s2">and </span><span class="s1">self.threads &gt; </span><span class="s4">1</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s3">&quot;gthread&quot;</span>
+        <span class="s2">return </span><span class="s1">uri</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">worker_class(self):</span>
+        <span class="s1">uri = self.settings[</span><span class="s3">'worker_class'</span><span class="s1">].get()</span>
+
+        <span class="s0"># are we using a threaded worker?</span>
+        <span class="s1">is_sync = uri.endswith(</span><span class="s3">'SyncWorker'</span><span class="s1">) </span><span class="s2">or </span><span class="s1">uri == </span><span class="s3">'sync'</span>
+        <span class="s2">if </span><span class="s1">is_sync </span><span class="s2">and </span><span class="s1">self.threads &gt; </span><span class="s4">1</span><span class="s1">:</span>
+            <span class="s1">uri = </span><span class="s3">&quot;gunicorn.workers.gthread.ThreadWorker&quot;</span>
+
+        <span class="s1">worker_class = util.load_class(uri)</span>
+        <span class="s2">if </span><span class="s1">hasattr(worker_class</span><span class="s2">, </span><span class="s3">&quot;setup&quot;</span><span class="s1">):</span>
+            <span class="s1">worker_class.setup()</span>
+        <span class="s2">return </span><span class="s1">worker_class</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">address(self):</span>
+        <span class="s1">s = self.settings[</span><span class="s3">'bind'</span><span class="s1">].get()</span>
+        <span class="s2">return </span><span class="s1">[util.parse_address(util.bytes_to_str(bind)) </span><span class="s2">for </span><span class="s1">bind </span><span class="s2">in </span><span class="s1">s]</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">uid(self):</span>
+        <span class="s2">return </span><span class="s1">self.settings[</span><span class="s3">'user'</span><span class="s1">].get()</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">gid(self):</span>
+        <span class="s2">return </span><span class="s1">self.settings[</span><span class="s3">'group'</span><span class="s1">].get()</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">proc_name(self):</span>
+        <span class="s1">pn = self.settings[</span><span class="s3">'proc_name'</span><span class="s1">].get()</span>
+        <span class="s2">if </span><span class="s1">pn </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">pn</span>
+        <span class="s2">else</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">self.settings[</span><span class="s3">'default_proc_name'</span><span class="s1">].get()</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">logger_class(self):</span>
+        <span class="s1">uri = self.settings[</span><span class="s3">'logger_class'</span><span class="s1">].get()</span>
+        <span class="s2">if </span><span class="s1">uri == </span><span class="s3">&quot;simple&quot;</span><span class="s1">:</span>
+            <span class="s0"># support the default</span>
+            <span class="s1">uri = LoggerClass.default</span>
+
+        <span class="s0"># if default logger is in use, and statsd is on, automagically switch</span>
+        <span class="s0"># to the statsd logger</span>
+        <span class="s2">if </span><span class="s1">uri == LoggerClass.default:</span>
+            <span class="s2">if </span><span class="s3">'statsd_host' </span><span class="s2">in </span><span class="s1">self.settings </span><span class="s2">and </span><span class="s1">self.settings[</span><span class="s3">'statsd_host'</span><span class="s1">].value </span><span class="s2">is not None</span><span class="s1">:</span>
+                <span class="s1">uri = </span><span class="s3">&quot;gunicorn.instrument.statsd.Statsd&quot;</span>
+
+        <span class="s1">logger_class = util.load_class(</span>
+            <span class="s1">uri</span><span class="s2">,</span>
+            <span class="s1">default=</span><span class="s3">&quot;gunicorn.glogging.Logger&quot;</span><span class="s2">,</span>
+            <span class="s1">section=</span><span class="s3">&quot;gunicorn.loggers&quot;</span><span class="s1">)</span>
+
+        <span class="s2">if </span><span class="s1">hasattr(logger_class</span><span class="s2">, </span><span class="s3">&quot;install&quot;</span><span class="s1">):</span>
+            <span class="s1">logger_class.install()</span>
+        <span class="s2">return </span><span class="s1">logger_class</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">is_ssl(self):</span>
+        <span class="s2">return </span><span class="s1">self.certfile </span><span class="s2">or </span><span class="s1">self.keyfile</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">ssl_options(self):</span>
+        <span class="s1">opts = {}</span>
+        <span class="s2">for </span><span class="s1">name</span><span class="s2">, </span><span class="s1">value </span><span class="s2">in </span><span class="s1">self.settings.items():</span>
+            <span class="s2">if </span><span class="s1">value.section == </span><span class="s3">'SSL'</span><span class="s1">:</span>
+                <span class="s1">opts[name] = value.get()</span>
+        <span class="s2">return </span><span class="s1">opts</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">env(self):</span>
+        <span class="s1">raw_env = self.settings[</span><span class="s3">'raw_env'</span><span class="s1">].get()</span>
+        <span class="s1">env = {}</span>
+
+        <span class="s2">if not </span><span class="s1">raw_env:</span>
+            <span class="s2">return </span><span class="s1">env</span>
+
+        <span class="s2">for </span><span class="s1">e </span><span class="s2">in </span><span class="s1">raw_env:</span>
+            <span class="s1">s = util.bytes_to_str(e)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">k</span><span class="s2">, </span><span class="s1">v = s.split(</span><span class="s3">'='</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s2">except </span><span class="s1">ValueError:</span>
+                <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;environment setting %r invalid&quot; </span><span class="s1">% s)</span>
+
+            <span class="s1">env[k] = v</span>
+
+        <span class="s2">return </span><span class="s1">env</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">sendfile(self):</span>
+        <span class="s2">if </span><span class="s1">self.settings[</span><span class="s3">'sendfile'</span><span class="s1">].get() </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s2">return False</span>
+
+        <span class="s2">if </span><span class="s3">'SENDFILE' </span><span class="s2">in </span><span class="s1">os.environ:</span>
+            <span class="s1">sendfile = os.environ[</span><span class="s3">'SENDFILE'</span><span class="s1">].lower()</span>
+            <span class="s2">return </span><span class="s1">sendfile </span><span class="s2">in </span><span class="s1">[</span><span class="s3">'y'</span><span class="s2">, </span><span class="s3">'1'</span><span class="s2">, </span><span class="s3">'yes'</span><span class="s2">, </span><span class="s3">'true'</span><span class="s1">]</span>
+
+        <span class="s2">return True</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">reuse_port(self):</span>
+        <span class="s2">return </span><span class="s1">self.settings[</span><span class="s3">'reuse_port'</span><span class="s1">].get()</span>
+
+    <span class="s1">@property</span>
+    <span class="s2">def </span><span class="s1">paste_global_conf(self):</span>
+        <span class="s1">raw_global_conf = self.settings[</span><span class="s3">'raw_paste_global_conf'</span><span class="s1">].get()</span>
+        <span class="s2">if </span><span class="s1">raw_global_conf </span><span class="s2">is None</span><span class="s1">:</span>
+            <span class="s2">return None</span>
+
+        <span class="s1">global_conf = {}</span>
+        <span class="s2">for </span><span class="s1">e </span><span class="s2">in </span><span class="s1">raw_global_conf:</span>
+            <span class="s1">s = util.bytes_to_str(e)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">k</span><span class="s2">, </span><span class="s1">v = re.split(</span><span class="s3">r'(?&lt;!\\)='</span><span class="s2">, </span><span class="s1">s</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s2">except </span><span class="s1">ValueError:</span>
+                <span class="s2">raise </span><span class="s1">RuntimeError(</span><span class="s3">&quot;environment setting %r invalid&quot; </span><span class="s1">% s)</span>
+            <span class="s1">k = k.replace(</span><span class="s3">'</span><span class="s2">\\</span><span class="s3">='</span><span class="s2">, </span><span class="s3">'='</span><span class="s1">)</span>
+            <span class="s1">v = v.replace(</span><span class="s3">'</span><span class="s2">\\</span><span class="s3">='</span><span class="s2">, </span><span class="s3">'='</span><span class="s1">)</span>
+            <span class="s1">global_conf[k] = v</span>
+
+        <span class="s2">return </span><span class="s1">global_conf</span>
+
+
+<span class="s2">class </span><span class="s1">SettingMeta(type):</span>
+    <span class="s2">def </span><span class="s1">__new__(cls</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">bases</span><span class="s2">, </span><span class="s1">attrs):</span>
+        <span class="s1">super_new = super().__new__</span>
+        <span class="s1">parents = [b </span><span class="s2">for </span><span class="s1">b </span><span class="s2">in </span><span class="s1">bases </span><span class="s2">if </span><span class="s1">isinstance(b</span><span class="s2">, </span><span class="s1">SettingMeta)]</span>
+        <span class="s2">if not </span><span class="s1">parents:</span>
+            <span class="s2">return </span><span class="s1">super_new(cls</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">bases</span><span class="s2">, </span><span class="s1">attrs)</span>
+
+        <span class="s1">attrs[</span><span class="s3">&quot;order&quot;</span><span class="s1">] = len(KNOWN_SETTINGS)</span>
+        <span class="s1">attrs[</span><span class="s3">&quot;validator&quot;</span><span class="s1">] = staticmethod(attrs[</span><span class="s3">&quot;validator&quot;</span><span class="s1">])</span>
+
+        <span class="s1">new_class = super_new(cls</span><span class="s2">, </span><span class="s1">name</span><span class="s2">, </span><span class="s1">bases</span><span class="s2">, </span><span class="s1">attrs)</span>
+        <span class="s1">new_class.fmt_desc(attrs.get(</span><span class="s3">&quot;desc&quot;</span><span class="s2">, </span><span class="s3">&quot;&quot;</span><span class="s1">))</span>
+        <span class="s1">KNOWN_SETTINGS.append(new_class)</span>
+        <span class="s2">return </span><span class="s1">new_class</span>
+
+    <span class="s2">def </span><span class="s1">fmt_desc(cls</span><span class="s2">, </span><span class="s1">desc):</span>
+        <span class="s1">desc = textwrap.dedent(desc).strip()</span>
+        <span class="s1">setattr(cls</span><span class="s2">, </span><span class="s3">&quot;desc&quot;</span><span class="s2">, </span><span class="s1">desc)</span>
+        <span class="s1">setattr(cls</span><span class="s2">, </span><span class="s3">&quot;short&quot;</span><span class="s2">, </span><span class="s1">desc.splitlines()[</span><span class="s4">0</span><span class="s1">])</span>
+
+
+<span class="s2">class </span><span class="s1">Setting(object):</span>
+    <span class="s1">name = </span><span class="s2">None</span>
+    <span class="s1">value = </span><span class="s2">None</span>
+    <span class="s1">section = </span><span class="s2">None</span>
+    <span class="s1">cli = </span><span class="s2">None</span>
+    <span class="s1">validator = </span><span class="s2">None</span>
+    <span class="s1">type = </span><span class="s2">None</span>
+    <span class="s1">meta = </span><span class="s2">None</span>
+    <span class="s1">action = </span><span class="s2">None</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">short = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s2">None</span>
+    <span class="s1">nargs = </span><span class="s2">None</span>
+    <span class="s1">const = </span><span class="s2">None</span>
+
+    <span class="s2">def </span><span class="s1">__init__(self):</span>
+        <span class="s2">if </span><span class="s1">self.default </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">self.set(self.default)</span>
+
+    <span class="s2">def </span><span class="s1">add_option(self</span><span class="s2">, </span><span class="s1">parser):</span>
+        <span class="s2">if not </span><span class="s1">self.cli:</span>
+            <span class="s2">return</span>
+        <span class="s1">args = tuple(self.cli)</span>
+
+        <span class="s1">help_txt = </span><span class="s3">&quot;%s [%s]&quot; </span><span class="s1">% (self.short</span><span class="s2">, </span><span class="s1">self.default)</span>
+        <span class="s1">help_txt = help_txt.replace(</span><span class="s3">&quot;%&quot;</span><span class="s2">, </span><span class="s3">&quot;%%&quot;</span><span class="s1">)</span>
+
+        <span class="s1">kwargs = {</span>
+            <span class="s3">&quot;dest&quot;</span><span class="s1">: self.name</span><span class="s2">,</span>
+            <span class="s3">&quot;action&quot;</span><span class="s1">: self.action </span><span class="s2">or </span><span class="s3">&quot;store&quot;</span><span class="s2">,</span>
+            <span class="s3">&quot;type&quot;</span><span class="s1">: self.type </span><span class="s2">or </span><span class="s1">str</span><span class="s2">,</span>
+            <span class="s3">&quot;default&quot;</span><span class="s1">: </span><span class="s2">None,</span>
+            <span class="s3">&quot;help&quot;</span><span class="s1">: help_txt</span>
+        <span class="s1">}</span>
+
+        <span class="s2">if </span><span class="s1">self.meta </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">kwargs[</span><span class="s3">'metavar'</span><span class="s1">] = self.meta</span>
+
+        <span class="s2">if </span><span class="s1">kwargs[</span><span class="s3">&quot;action&quot;</span><span class="s1">] != </span><span class="s3">&quot;store&quot;</span><span class="s1">:</span>
+            <span class="s1">kwargs.pop(</span><span class="s3">&quot;type&quot;</span><span class="s1">)</span>
+
+        <span class="s2">if </span><span class="s1">self.nargs </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">kwargs[</span><span class="s3">&quot;nargs&quot;</span><span class="s1">] = self.nargs</span>
+
+        <span class="s2">if </span><span class="s1">self.const </span><span class="s2">is not None</span><span class="s1">:</span>
+            <span class="s1">kwargs[</span><span class="s3">&quot;const&quot;</span><span class="s1">] = self.const</span>
+
+        <span class="s1">parser.add_argument(*args</span><span class="s2">, </span><span class="s1">**kwargs)</span>
+
+    <span class="s2">def </span><span class="s1">copy(self):</span>
+        <span class="s2">return </span><span class="s1">copy.copy(self)</span>
+
+    <span class="s2">def </span><span class="s1">get(self):</span>
+        <span class="s2">return </span><span class="s1">self.value</span>
+
+    <span class="s2">def </span><span class="s1">set(self</span><span class="s2">, </span><span class="s1">val):</span>
+        <span class="s2">if not </span><span class="s1">callable(self.validator):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">'Invalid validator: %s' </span><span class="s1">% self.name)</span>
+        <span class="s1">self.value = self.validator(val)</span>
+
+    <span class="s2">def </span><span class="s1">__lt__(self</span><span class="s2">, </span><span class="s1">other):</span>
+        <span class="s2">return </span><span class="s1">(self.section == other.section </span><span class="s2">and</span>
+                <span class="s1">self.order &lt; other.order)</span>
+    <span class="s1">__cmp__ = __lt__</span>
+
+    <span class="s2">def </span><span class="s1">__repr__(self):</span>
+        <span class="s2">return </span><span class="s3">&quot;&lt;%s.%s object at %x with value %r&gt;&quot; </span><span class="s1">% (</span>
+            <span class="s1">self.__class__.__module__</span><span class="s2">,</span>
+            <span class="s1">self.__class__.__name__</span><span class="s2">,</span>
+            <span class="s1">id(self)</span><span class="s2">,</span>
+            <span class="s1">self.value</span><span class="s2">,</span>
+        <span class="s1">)</span>
+
+
+<span class="s1">Setting = SettingMeta(</span><span class="s3">'Setting'</span><span class="s2">, </span><span class="s1">(Setting</span><span class="s2">,</span><span class="s1">)</span><span class="s2">, </span><span class="s1">{})</span>
+
+
+<span class="s2">def </span><span class="s1">validate_bool(val):</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s2">return</span>
+
+    <span class="s2">if </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">bool):</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">if not </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">str):</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Invalid type for casting: %s&quot; </span><span class="s1">% val)</span>
+    <span class="s2">if </span><span class="s1">val.lower().strip() == </span><span class="s3">&quot;true&quot;</span><span class="s1">:</span>
+        <span class="s2">return True</span>
+    <span class="s2">elif </span><span class="s1">val.lower().strip() == </span><span class="s3">&quot;false&quot;</span><span class="s1">:</span>
+        <span class="s2">return False</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Invalid boolean: %s&quot; </span><span class="s1">% val)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_dict(val):</span>
+    <span class="s2">if not </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">dict):</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Value is not a dictionary: %s &quot; </span><span class="s1">% val)</span>
+    <span class="s2">return </span><span class="s1">val</span>
+
+
+<span class="s2">def </span><span class="s1">validate_pos_int(val):</span>
+    <span class="s2">if not </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">int):</span>
+        <span class="s1">val = int(val</span><span class="s2">, </span><span class="s4">0</span><span class="s1">)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s0"># Booleans are ints!</span>
+        <span class="s1">val = int(val)</span>
+    <span class="s2">if </span><span class="s1">val &lt; </span><span class="s4">0</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;Value must be positive: %s&quot; </span><span class="s1">% val)</span>
+    <span class="s2">return </span><span class="s1">val</span>
+
+
+<span class="s2">def </span><span class="s1">validate_ssl_version(val):</span>
+    <span class="s2">if </span><span class="s1">val != SSLVersion.default:</span>
+        <span class="s1">sys.stderr.write(</span><span class="s3">&quot;Warning: option `ssl_version` is deprecated and it is ignored. Use ssl_context instead.</span><span class="s2">\n</span><span class="s3">&quot;</span><span class="s1">)</span>
+    <span class="s2">return </span><span class="s1">val</span>
+
+
+<span class="s2">def </span><span class="s1">validate_string(val):</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s2">return None</span>
+    <span class="s2">if not </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">str):</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Not a string: %s&quot; </span><span class="s1">% val)</span>
+    <span class="s2">return </span><span class="s1">val.strip()</span>
+
+
+<span class="s2">def </span><span class="s1">validate_file_exists(val):</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s2">return None</span>
+    <span class="s2">if not </span><span class="s1">os.path.exists(val):</span>
+        <span class="s2">raise </span><span class="s1">ValueError(</span><span class="s3">&quot;File %s does not exists.&quot; </span><span class="s1">% val)</span>
+    <span class="s2">return </span><span class="s1">val</span>
+
+
+<span class="s2">def </span><span class="s1">validate_list_string(val):</span>
+    <span class="s2">if not </span><span class="s1">val:</span>
+        <span class="s2">return </span><span class="s1">[]</span>
+
+    <span class="s0"># legacy syntax</span>
+    <span class="s2">if </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">str):</span>
+        <span class="s1">val = [val]</span>
+
+    <span class="s2">return </span><span class="s1">[validate_string(v) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">val]</span>
+
+
+<span class="s2">def </span><span class="s1">validate_list_of_existing_files(val):</span>
+    <span class="s2">return </span><span class="s1">[validate_file_exists(v) </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">validate_list_string(val)]</span>
+
+
+<span class="s2">def </span><span class="s1">validate_string_to_list(val):</span>
+    <span class="s1">val = validate_string(val)</span>
+
+    <span class="s2">if not </span><span class="s1">val:</span>
+        <span class="s2">return </span><span class="s1">[]</span>
+
+    <span class="s2">return </span><span class="s1">[v.strip() </span><span class="s2">for </span><span class="s1">v </span><span class="s2">in </span><span class="s1">val.split(</span><span class="s3">&quot;,&quot;</span><span class="s1">) </span><span class="s2">if </span><span class="s1">v]</span>
+
+
+<span class="s2">def </span><span class="s1">validate_class(val):</span>
+    <span class="s2">if </span><span class="s1">inspect.isfunction(val) </span><span class="s2">or </span><span class="s1">inspect.ismethod(val):</span>
+        <span class="s1">val = val()</span>
+    <span class="s2">if </span><span class="s1">inspect.isclass(val):</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">return </span><span class="s1">validate_string(val)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_callable(arity):</span>
+    <span class="s2">def </span><span class="s1">_validate_callable(val):</span>
+        <span class="s2">if </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">str):</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">mod_name</span><span class="s2">, </span><span class="s1">obj_name = val.rsplit(</span><span class="s3">&quot;.&quot;</span><span class="s2">, </span><span class="s4">1</span><span class="s1">)</span>
+            <span class="s2">except </span><span class="s1">ValueError:</span>
+                <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Value '%s' is not import string. &quot;</span>
+                                <span class="s3">&quot;Format: module[.submodules...].object&quot; </span><span class="s1">% val)</span>
+            <span class="s2">try</span><span class="s1">:</span>
+                <span class="s1">mod = __import__(mod_name</span><span class="s2">, </span><span class="s1">fromlist=[obj_name])</span>
+                <span class="s1">val = getattr(mod</span><span class="s2">, </span><span class="s1">obj_name)</span>
+            <span class="s2">except </span><span class="s1">ImportError </span><span class="s2">as </span><span class="s1">e:</span>
+                <span class="s2">raise </span><span class="s1">TypeError(str(e))</span>
+            <span class="s2">except </span><span class="s1">AttributeError:</span>
+                <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Can not load '%s' from '%s'&quot;</span>
+                                <span class="s3">&quot;&quot; </span><span class="s1">% (obj_name</span><span class="s2">, </span><span class="s1">mod_name))</span>
+        <span class="s2">if not </span><span class="s1">callable(val):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Value is not callable: %s&quot; </span><span class="s1">% val)</span>
+        <span class="s2">if </span><span class="s1">arity != -</span><span class="s4">1 </span><span class="s2">and </span><span class="s1">arity != util.get_arity(val):</span>
+            <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Value must have an arity of: %s&quot; </span><span class="s1">% arity)</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">return </span><span class="s1">_validate_callable</span>
+
+
+<span class="s2">def </span><span class="s1">validate_user(val):</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">os.geteuid()</span>
+    <span class="s2">if </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">int):</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">elif </span><span class="s1">val.isdigit():</span>
+        <span class="s2">return </span><span class="s1">int(val)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">pwd.getpwnam(val).pw_uid</span>
+        <span class="s2">except </span><span class="s1">KeyError:</span>
+            <span class="s2">raise </span><span class="s1">ConfigError(</span><span class="s3">&quot;No such user: '%s'&quot; </span><span class="s1">% val)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_group(val):</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">os.getegid()</span>
+
+    <span class="s2">if </span><span class="s1">isinstance(val</span><span class="s2">, </span><span class="s1">int):</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">elif </span><span class="s1">val.isdigit():</span>
+        <span class="s2">return </span><span class="s1">int(val)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s2">try</span><span class="s1">:</span>
+            <span class="s2">return </span><span class="s1">grp.getgrnam(val).gr_gid</span>
+        <span class="s2">except </span><span class="s1">KeyError:</span>
+            <span class="s2">raise </span><span class="s1">ConfigError(</span><span class="s3">&quot;No such group: '%s'&quot; </span><span class="s1">% val)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_post_request(val):</span>
+    <span class="s1">val = validate_callable(-</span><span class="s4">1</span><span class="s1">)(val)</span>
+
+    <span class="s1">largs = util.get_arity(val)</span>
+    <span class="s2">if </span><span class="s1">largs == </span><span class="s4">4</span><span class="s1">:</span>
+        <span class="s2">return </span><span class="s1">val</span>
+    <span class="s2">elif </span><span class="s1">largs == </span><span class="s4">3</span><span class="s1">:</span>
+        <span class="s2">return lambda </span><span class="s1">worker</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">env</span><span class="s2">, </span><span class="s1">_r: val(worker</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">env)</span>
+    <span class="s2">elif </span><span class="s1">largs == </span><span class="s4">2</span><span class="s1">:</span>
+        <span class="s2">return lambda </span><span class="s1">worker</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">_e</span><span class="s2">, </span><span class="s1">_r: val(worker</span><span class="s2">, </span><span class="s1">req)</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Value must have an arity of: 4&quot;</span><span class="s1">)</span>
+
+
+<span class="s2">def </span><span class="s1">validate_chdir(val):</span>
+    <span class="s0"># valid if the value is a string</span>
+    <span class="s1">val = validate_string(val)</span>
+
+    <span class="s0"># transform relative paths</span>
+    <span class="s1">path = os.path.abspath(os.path.normpath(os.path.join(util.getcwd()</span><span class="s2">, </span><span class="s1">val)))</span>
+
+    <span class="s0"># test if the path exists</span>
+    <span class="s2">if not </span><span class="s1">os.path.exists(path):</span>
+        <span class="s2">raise </span><span class="s1">ConfigError(</span><span class="s3">&quot;can't chdir to %r&quot; </span><span class="s1">% val)</span>
+
+    <span class="s2">return </span><span class="s1">path</span>
+
+
+<span class="s2">def </span><span class="s1">validate_statsd_address(val):</span>
+    <span class="s1">val = validate_string(val)</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">is None</span><span class="s1">:</span>
+        <span class="s2">return None</span>
+
+    <span class="s0"># As of major release 20, util.parse_address would recognize unix:PORT</span>
+    <span class="s0"># as a UDS address, breaking backwards compatibility. We defend against</span>
+    <span class="s0"># that regression here (this is also unit-tested).</span>
+    <span class="s0"># Feel free to remove in the next major release.</span>
+    <span class="s1">unix_hostname_regression = re.match(</span><span class="s3">r'^unix:(\d+)$'</span><span class="s2">, </span><span class="s1">val)</span>
+    <span class="s2">if </span><span class="s1">unix_hostname_regression:</span>
+        <span class="s2">return </span><span class="s1">(</span><span class="s3">'unix'</span><span class="s2">, </span><span class="s1">int(unix_hostname_regression.group(</span><span class="s4">1</span><span class="s1">)))</span>
+
+    <span class="s2">try</span><span class="s1">:</span>
+        <span class="s1">address = util.parse_address(val</span><span class="s2">, </span><span class="s1">default_port=</span><span class="s3">'8125'</span><span class="s1">)</span>
+    <span class="s2">except </span><span class="s1">RuntimeError:</span>
+        <span class="s2">raise </span><span class="s1">TypeError(</span><span class="s3">&quot;Value must be one of ('host:port', 'unix://PATH')&quot;</span><span class="s1">)</span>
+
+    <span class="s2">return </span><span class="s1">address</span>
+
+
+<span class="s2">def </span><span class="s1">validate_reload_engine(val):</span>
+    <span class="s2">if </span><span class="s1">val </span><span class="s2">not in </span><span class="s1">reloader_engines:</span>
+        <span class="s2">raise </span><span class="s1">ConfigError(</span><span class="s3">&quot;Invalid reload_engine: %r&quot; </span><span class="s1">% val)</span>
+
+    <span class="s2">return </span><span class="s1">val</span>
+
+
+<span class="s2">def </span><span class="s1">get_default_config_file():</span>
+    <span class="s1">config_path = os.path.join(os.path.abspath(os.getcwd())</span><span class="s2">,</span>
+                               <span class="s3">'gunicorn.conf.py'</span><span class="s1">)</span>
+    <span class="s2">if </span><span class="s1">os.path.exists(config_path):</span>
+        <span class="s2">return </span><span class="s1">config_path</span>
+    <span class="s2">return None</span>
+
+
+<span class="s2">class </span><span class="s1">ConfigFile(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;config&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Config File&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-c&quot;</span><span class="s2">, </span><span class="s3">&quot;--config&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;CONFIG&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s3">&quot;./gunicorn.conf.py&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">:ref:`The Gunicorn config file&lt;configuration_file&gt;`. 
+ 
+        A string of the form ``PATH``, ``file:PATH``, or ``python:MODULE_NAME``. 
+ 
+        Only has an effect when specified on the command line or as part of an 
+        application specific configuration. 
+ 
+        By default, a file named ``gunicorn.conf.py`` will be read from the same 
+        directory where gunicorn is being run. 
+ 
+        .. versionchanged:: 19.4 
+           Loading the config from a Python module requires the ``python:`` 
+           prefix. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WSGIApp(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;wsgi_app&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Config File&quot;</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">A WSGI application path in pattern ``$(MODULE_NAME):$(VARIABLE_NAME)``. 
+ 
+        .. versionadded:: 20.1.0 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Bind(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;bind&quot;</span>
+    <span class="s1">action = </span><span class="s3">&quot;append&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Socket&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-b&quot;</span><span class="s2">, </span><span class="s3">&quot;--bind&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;ADDRESS&quot;</span>
+    <span class="s1">validator = validate_list_string</span>
+
+    <span class="s2">if </span><span class="s3">'PORT' </span><span class="s2">in </span><span class="s1">os.environ:</span>
+        <span class="s1">default = [</span><span class="s3">'0.0.0.0:{0}'</span><span class="s1">.format(os.environ.get(</span><span class="s3">'PORT'</span><span class="s1">))]</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">default = [</span><span class="s3">'127.0.0.1:8000'</span><span class="s1">]</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The socket to bind. 
+ 
+        A string of the form: ``HOST``, ``HOST:PORT``, ``unix:PATH``, 
+        ``fd://FD``. An IP is a valid ``HOST``. 
+ 
+        .. versionchanged:: 20.0 
+           Support for ``fd://FD`` got added. 
+ 
+        Multiple addresses can be bound. ex.:: 
+ 
+            $ gunicorn -b 127.0.0.1:8000 -b [::1]:8000 test:app 
+ 
+        will bind the `test:app` application on localhost both on ipv6 
+        and ipv4 interfaces. 
+ 
+        If the ``PORT`` environment variable is defined, the default 
+        is ``['0.0.0.0:$PORT']``. If it is not defined, the default 
+        is ``['127.0.0.1:8000']``. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Backlog(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;backlog&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Socket&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--backlog&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">2048</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The maximum number of pending connections. 
+ 
+        This refers to the number of clients that can be waiting to be served. 
+        Exceeding this number results in the client getting an error when 
+        attempting to connect. It should only affect servers under significant 
+        load. 
+ 
+        Must be a positive integer. Generally set in the 64-2048 range. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Workers(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;workers&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-w&quot;</span><span class="s2">, </span><span class="s3">&quot;--workers&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = int(os.environ.get(</span><span class="s3">&quot;WEB_CONCURRENCY&quot;</span><span class="s2">, </span><span class="s4">1</span><span class="s1">))</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The number of worker processes for handling requests. 
+ 
+        A positive integer generally in the ``2-4 x $(NUM_CORES)`` range. 
+        You'll want to vary this a bit to find the best for your particular 
+        application's work load. 
+ 
+        By default, the value of the ``WEB_CONCURRENCY`` environment variable, 
+        which is set by some Platform-as-a-Service providers such as Heroku. If 
+        it is not defined, the default is ``1``. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerClass(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;worker_class&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-k&quot;</span><span class="s2">, </span><span class="s3">&quot;--worker-class&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_class</span>
+    <span class="s1">default = </span><span class="s3">&quot;sync&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The type of workers to use. 
+ 
+        The default class (``sync``) should handle most &quot;normal&quot; types of 
+        workloads. You'll want to read :doc:`design` for information on when 
+        you might want to choose one of the other worker classes. Required 
+        libraries may be installed using setuptools' ``extras_require`` feature. 
+ 
+        A string referring to one of the following bundled classes: 
+ 
+        * ``sync`` 
+        * ``eventlet`` - Requires eventlet &gt;= 0.24.1 (or install it via 
+          ``pip install gunicorn[eventlet]``) 
+        * ``gevent``   - Requires gevent &gt;= 1.4 (or install it via 
+          ``pip install gunicorn[gevent]``) 
+        * ``tornado``  - Requires tornado &gt;= 0.2 (or install it via 
+          ``pip install gunicorn[tornado]``) 
+        * ``gthread``  - Python 2 requires the futures package to be installed 
+          (or install it via ``pip install gunicorn[gthread]``) 
+ 
+        Optionally, you can provide your own worker by giving Gunicorn a 
+        Python path to a subclass of ``gunicorn.workers.base.Worker``. 
+        This alternative syntax will load the gevent class: 
+        ``gunicorn.workers.ggevent.GeventWorker``. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerThreads(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;threads&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--threads&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">1</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The number of worker threads for handling requests. 
+ 
+        Run each worker with the specified number of threads. 
+ 
+        A positive integer generally in the ``2-4 x $(NUM_CORES)`` range. 
+        You'll want to vary this a bit to find the best for your particular 
+        application's work load. 
+ 
+        If it is not defined, the default is ``1``. 
+ 
+        This setting only affects the Gthread worker type. 
+ 
+        .. note:: 
+           If you try to use the ``sync`` worker type and set the ``threads`` 
+           setting to more than 1, the ``gthread`` worker type will be used 
+           instead. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerConnections(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;worker_connections&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--worker-connections&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">1000</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The maximum number of simultaneous clients. 
+ 
+        This setting only affects the ``gthread``, ``eventlet`` and ``gevent`` worker types. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">MaxRequests(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;max_requests&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--max-requests&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">0</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The maximum number of requests a worker will process before restarting. 
+ 
+        Any value greater than zero will limit the number of requests a worker 
+        will process before automatically restarting. This is a simple method 
+        to help limit the damage of memory leaks. 
+ 
+        If this is set to zero (the default) then the automatic worker 
+        restarts are disabled. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">MaxRequestsJitter(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;max_requests_jitter&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--max-requests-jitter&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">0</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The maximum jitter to add to the *max_requests* setting. 
+ 
+        The jitter causes the restart per worker to be randomized by 
+        ``randint(0, max_requests_jitter)``. This is intended to stagger worker 
+        restarts to avoid all workers restarting at the same time. 
+ 
+        .. versionadded:: 19.2 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Timeout(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;timeout&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-t&quot;</span><span class="s2">, </span><span class="s3">&quot;--timeout&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">30</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Workers silent for more than this many seconds are killed and restarted. 
+ 
+        Value is a positive number or 0. Setting it to 0 has the effect of 
+        infinite timeouts by disabling timeouts for all workers entirely. 
+ 
+        Generally, the default of thirty seconds should suffice. Only set this 
+        noticeably higher if you're sure of the repercussions for sync workers. 
+        For the non sync workers it just means that the worker process is still 
+        communicating and is not tied to the length of time required to handle a 
+        single request. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">GracefulTimeout(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;graceful_timeout&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--graceful-timeout&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">30</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Timeout for graceful workers restart. 
+ 
+        After receiving a restart signal, workers have this much time to finish 
+        serving requests. Workers still alive after the timeout (starting from 
+        the receipt of the restart signal) are force killed. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Keepalive(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;keepalive&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Worker Processes&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--keep-alive&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">2</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The number of seconds to wait for requests on a Keep-Alive connection. 
+ 
+        Generally set in the 1-5 seconds range for servers with direct connection 
+        to the client (e.g. when you don't have separate load balancer). When 
+        Gunicorn is deployed behind a load balancer, it often makes sense to 
+        set this to a higher value. 
+ 
+        .. note:: 
+           ``sync`` worker does not support persistent connections and will 
+           ignore this option. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LimitRequestLine(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;limit_request_line&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Security&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--limit-request-line&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">4094</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The maximum size of HTTP request line in bytes. 
+ 
+        This parameter is used to limit the allowed size of a client's 
+        HTTP request-line. Since the request-line consists of the HTTP 
+        method, URI, and protocol version, this directive places a 
+        restriction on the length of a request-URI allowed for a request 
+        on the server. A server needs this value to be large enough to 
+        hold any of its resource names, including any information that 
+        might be passed in the query part of a GET request. Value is a number 
+        from 0 (unlimited) to 8190. 
+ 
+        This parameter can be used to prevent any DDOS attack. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LimitRequestFields(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;limit_request_fields&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Security&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--limit-request-fields&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">100</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Limit the number of HTTP headers fields in a request. 
+ 
+        This parameter is used to limit the number of headers in a request to 
+        prevent DDOS attack. Used with the *limit_request_field_size* it allows 
+        more safety. By default this value is 100 and can't be larger than 
+        32768. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LimitRequestFieldSize(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;limit_request_field_size&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Security&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--limit-request-field_size&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = int</span>
+    <span class="s1">default = </span><span class="s4">8190</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Limit the allowed size of an HTTP request header field. 
+ 
+        Value is a positive number or 0. Setting it to 0 will allow unlimited 
+        header field sizes. 
+ 
+        .. warning:: 
+           Setting this parameter to a very high or unlimited value can open 
+           up for DDOS attacks. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Reload(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;reload&quot;</span>
+    <span class="s1">section = </span><span class="s3">'Debugging'</span>
+    <span class="s1">cli = [</span><span class="s3">'--reload'</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">'store_true'</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+
+    <span class="s1">desc = </span><span class="s3">'''</span><span class="s2">\ 
+        </span><span class="s3">Restart workers when code changes. 
+ 
+        This setting is intended for development. It will cause workers to be 
+        restarted whenever application code changes. 
+ 
+        The reloader is incompatible with application preloading. When using a 
+        paste configuration be sure that the server block does not import any 
+        application code or the reload will not work as designed. 
+ 
+        The default behavior is to attempt inotify with a fallback to file 
+        system polling. Generally, inotify should be preferred if available 
+        because it consumes less system resources. 
+ 
+        .. note:: 
+           In order to use the inotify reloader, you must have the ``inotify`` 
+           package installed. 
+        '''</span>
+
+
+<span class="s2">class </span><span class="s1">ReloadEngine(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;reload_engine&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Debugging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--reload-engine&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_reload_engine</span>
+    <span class="s1">default = </span><span class="s3">&quot;auto&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The implementation that should be used to power :ref:`reload`. 
+ 
+        Valid engines are: 
+ 
+        * ``'auto'`` 
+        * ``'poll'`` 
+        * ``'inotify'`` (requires inotify) 
+ 
+        .. versionadded:: 19.7 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ReloadExtraFiles(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;reload_extra_files&quot;</span>
+    <span class="s1">action = </span><span class="s3">&quot;append&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Debugging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--reload-extra-file&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILES&quot;</span>
+    <span class="s1">validator = validate_list_of_existing_files</span>
+    <span class="s1">default = []</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Extends :ref:`reload` option to also watch and reload on additional files 
+        (e.g., templates, configurations, specifications, etc.). 
+ 
+        .. versionadded:: 19.8 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Spew(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;spew&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Debugging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--spew&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Install a trace function that spews every line executed by the server. 
+ 
+        This is the nuclear option. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ConfigCheck(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;check_config&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Debugging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--check-config&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Check the configuration and exit. The exit status is 0 if the 
+        configuration is correct, and 1 if the configuration is incorrect. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PrintConfig(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;print_config&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Debugging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--print-config&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Print the configuration settings as fully resolved. Implies :ref:`check-config`. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PreloadApp(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;preload_app&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--preload&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Load application code before the worker processes are forked. 
+ 
+        By preloading an application you can save some RAM resources as well as 
+        speed up server boot times. Although, if you defer application loading 
+        to each worker process, you can reload your application code easily by 
+        restarting workers. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Sendfile(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;sendfile&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--no-sendfile&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_const&quot;</span>
+    <span class="s1">const = </span><span class="s2">False</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Disables the use of ``sendfile()``. 
+ 
+        If not set, the value of the ``SENDFILE`` environment variable is used 
+        to enable or disable its usage. 
+ 
+        .. versionadded:: 19.2 
+        .. versionchanged:: 19.4 
+           Swapped ``--sendfile`` with ``--no-sendfile`` to actually allow 
+           disabling. 
+        .. versionchanged:: 19.6 
+           added support for the ``SENDFILE`` environment variable 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ReusePort(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;reuse_port&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--reuse-port&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Set the ``SO_REUSEPORT`` flag on the listening socket. 
+ 
+        .. versionadded:: 19.8 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Chdir(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;chdir&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--chdir&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_chdir</span>
+    <span class="s1">default = util.getcwd()</span>
+    <span class="s1">default_doc = </span><span class="s3">&quot;``'.'``&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Change directory to specified directory before loading apps. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Daemon(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;daemon&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-D&quot;</span><span class="s2">, </span><span class="s3">&quot;--daemon&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Daemonize the Gunicorn process. 
+ 
+        Detaches the server from the controlling terminal and enters the 
+        background. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Env(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;raw_env&quot;</span>
+    <span class="s1">action = </span><span class="s3">&quot;append&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-e&quot;</span><span class="s2">, </span><span class="s3">&quot;--env&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;ENV&quot;</span>
+    <span class="s1">validator = validate_list_string</span>
+    <span class="s1">default = []</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Set environment variables in the execution environment. 
+ 
+        Should be a list of strings in the ``key=value`` format. 
+ 
+        For example on the command line: 
+ 
+        .. code-block:: console 
+ 
+            $ gunicorn -b 127.0.0.1:8000 --env FOO=1 test:app 
+ 
+        Or in the configuration file: 
+ 
+        .. code-block:: python 
+ 
+            raw_env = [&quot;FOO=1&quot;] 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Pidfile(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;pidfile&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-p&quot;</span><span class="s2">, </span><span class="s3">&quot;--pid&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">A filename to use for the PID file. 
+ 
+        If not set, no PID file will be written. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerTmpDir(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;worker_tmp_dir&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--worker-tmp-dir&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;DIR&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">A directory to use for the worker heartbeat temporary file. 
+ 
+        If not set, the default temporary directory will be used. 
+ 
+        .. note:: 
+           The current heartbeat system involves calling ``os.fchmod`` on 
+           temporary file handlers and may block a worker for arbitrary time 
+           if the directory is on a disk-backed filesystem. 
+ 
+           See :ref:`blocking-os-fchmod` for more detailed information 
+           and a solution for avoiding this problem. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">User(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;user&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-u&quot;</span><span class="s2">, </span><span class="s3">&quot;--user&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;USER&quot;</span>
+    <span class="s1">validator = validate_user</span>
+    <span class="s1">default = os.geteuid()</span>
+    <span class="s1">default_doc = </span><span class="s3">&quot;``os.geteuid()``&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Switch worker processes to run as this user. 
+ 
+        A valid user id (as an integer) or the name of a user that can be 
+        retrieved with a call to ``pwd.getpwnam(value)`` or ``None`` to not 
+        change the worker process user. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Group(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;group&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-g&quot;</span><span class="s2">, </span><span class="s3">&quot;--group&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;GROUP&quot;</span>
+    <span class="s1">validator = validate_group</span>
+    <span class="s1">default = os.getegid()</span>
+    <span class="s1">default_doc = </span><span class="s3">&quot;``os.getegid()``&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Switch worker process to run as this group. 
+ 
+        A valid group id (as an integer) or the name of a user that can be 
+        retrieved with a call to ``pwd.getgrnam(value)`` or ``None`` to not 
+        change the worker processes group. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Umask(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;umask&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-m&quot;</span><span class="s2">, </span><span class="s3">&quot;--umask&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;INT&quot;</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">type = auto_int</span>
+    <span class="s1">default = </span><span class="s4">0</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">A bit mask for the file mode on files written by Gunicorn. 
+ 
+        Note that this affects unix socket permissions. 
+ 
+        A valid value for the ``os.umask(mode)`` call or a string compatible 
+        with ``int(value, 0)`` (``0`` means Python guesses the base, so values 
+        like ``0``, ``0xFF``, ``0022`` are valid for decimal, hex, and octal 
+        representations) 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Initgroups(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;initgroups&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--initgroups&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">'store_true'</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">If true, set the worker process's group access list with all of the 
+        groups of which the specified username is a member, plus the specified 
+        group id. 
+ 
+        .. versionadded:: 19.7 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">TmpUploadDir(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;tmp_upload_dir&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">meta = </span><span class="s3">&quot;DIR&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Directory to store temporary request data as they are read. 
+ 
+        This may disappear in the near future. 
+ 
+        This path should be writable by the process permissions set for Gunicorn 
+        workers. If not specified, Gunicorn will choose a system generated 
+        temporary directory. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">SecureSchemeHeader(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;secure_scheme_headers&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">validator = validate_dict</span>
+    <span class="s1">default = {</span>
+        <span class="s3">&quot;X-FORWARDED-PROTOCOL&quot;</span><span class="s1">: </span><span class="s3">&quot;ssl&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;X-FORWARDED-PROTO&quot;</span><span class="s1">: </span><span class="s3">&quot;https&quot;</span><span class="s2">,</span>
+        <span class="s3">&quot;X-FORWARDED-SSL&quot;</span><span class="s1">: </span><span class="s3">&quot;on&quot;</span>
+    <span class="s1">}</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+</span>
+        <span class="s3">A dictionary containing headers and values that the front-end proxy 
+        uses to indicate HTTPS requests. If the source IP is permitted by 
+        ``forwarded-allow-ips`` (below), *and* at least one request header matches 
+        a key-value pair listed in this dictionary, then Gunicorn will set 
+        ``wsgi.url_scheme`` to ``https``, so your application can tell that the 
+        request is secure. 
+ 
+        If the other headers listed in this dictionary are not present in the request, they will be ignored, 
+        but if the other headers are present and do not match the provided values, then 
+        the request will fail to parse. See the note below for more detailed examples of this behaviour. 
+ 
+        The dictionary should map upper-case header names to exact string 
+        values. The value comparisons are case-sensitive, unlike the header 
+        names, so make sure they're exactly what your front-end proxy sends 
+        when handling HTTPS requests. 
+ 
+        It is important that your front-end proxy configuration ensures that 
+        the headers defined here can not be passed directly from the client. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ForwardedAllowIPS(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;forwarded_allow_ips&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--forwarded-allow-ips&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_string_to_list</span>
+    <span class="s1">default = os.environ.get(</span><span class="s3">&quot;FORWARDED_ALLOW_IPS&quot;</span><span class="s2">, </span><span class="s3">&quot;127.0.0.1&quot;</span><span class="s1">)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Front-end's IPs from which allowed to handle set secure headers. 
+        (comma separate). 
+ 
+        Set to ``*`` to disable checking of Front-end IPs (useful for setups 
+        where you don't know in advance the IP address of Front-end, but 
+        you still trust the environment). 
+ 
+        By default, the value of the ``FORWARDED_ALLOW_IPS`` environment 
+        variable. If it is not defined, the default is ``&quot;127.0.0.1&quot;``. 
+ 
+        .. note:: 
+ 
+            The interplay between the request headers, the value of ``forwarded_allow_ips``, and the value of 
+            ``secure_scheme_headers`` is complex. Various scenarios are documented below to further elaborate. 
+            In each case, we have a request from the remote address 134.213.44.18, and the default value of 
+            ``secure_scheme_headers``: 
+ 
+            .. code:: 
+ 
+                secure_scheme_headers = { 
+                    'X-FORWARDED-PROTOCOL': 'ssl', 
+                    'X-FORWARDED-PROTO': 'https', 
+                    'X-FORWARDED-SSL': 'on' 
+                } 
+ 
+ 
+            .. list-table:: 
+                :header-rows: 1 
+                :align: center 
+                :widths: auto 
+ 
+                * - ``forwarded-allow-ips`` 
+                  - Secure Request Headers 
+                  - Result 
+                  - Explanation 
+                * - .. code:: 
+ 
+                        [&quot;127.0.0.1&quot;] 
+                  - .. code:: 
+ 
+                        X-Forwarded-Proto: https 
+                  - .. code:: 
+ 
+                        wsgi.url_scheme = &quot;http&quot; 
+                  - IP address was not allowed 
+                * - .. code:: 
+ 
+                        &quot;*&quot; 
+                  - &lt;none&gt; 
+                  - .. code:: 
+ 
+                        wsgi.url_scheme = &quot;http&quot; 
+                  - IP address allowed, but no secure headers provided 
+                * - .. code:: 
+ 
+                        &quot;*&quot; 
+                  - .. code:: 
+ 
+                        X-Forwarded-Proto: https 
+                  - .. code:: 
+ 
+                        wsgi.url_scheme = &quot;https&quot; 
+                  - IP address allowed, one request header matched 
+                * - .. code:: 
+ 
+                        [&quot;134.213.44.18&quot;] 
+                  - .. code:: 
+ 
+                        X-Forwarded-Ssl: on 
+                        X-Forwarded-Proto: http 
+                  - ``InvalidSchemeHeaders()`` raised 
+                  - IP address allowed, but the two secure headers disagreed on if HTTPS was used 
+ 
+ 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">AccessLog(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;accesslog&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--access-logfile&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The Access log file to write to. 
+ 
+        ``'-'`` means log to stdout. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">DisableRedirectAccessToSyslog(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;disable_redirect_access_to_syslog&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--disable-redirect-access-to-syslog&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">'store_true'</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Disable redirect access logs to syslog. 
+ 
+    .. versionadded:: 19.8 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">AccessLogFormat(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;access_log_format&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--access-logformat&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s3">'%(h)s %(l)s %(u)s %(t)s &quot;%(r)s&quot; %(s)s %(b)s &quot;%(f)s&quot; &quot;%(a)s&quot;'</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The access log format. 
+ 
+        ===========  =========== 
+        Identifier   Description 
+        ===========  =========== 
+        h            remote address 
+        l            ``'-'`` 
+        u            user name 
+        t            date of the request 
+        r            status line (e.g. ``GET / HTTP/1.1``) 
+        m            request method 
+        U            URL path without query string 
+        q            query string 
+        H            protocol 
+        s            status 
+        B            response length 
+        b            response length or ``'-'`` (CLF format) 
+        f            referer 
+        a            user agent 
+        T            request time in seconds 
+        M            request time in milliseconds 
+        D            request time in microseconds 
+        L            request time in decimal seconds 
+        p            process ID 
+        {header}i    request header 
+        {header}o    response header 
+        {variable}e  environment variable 
+        ===========  =========== 
+ 
+        Use lowercase for header and environment variable names, and put 
+        ``{...}x`` names inside ``%(...)s``. For example:: 
+ 
+            %({x-forwarded-for}i)s 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ErrorLog(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;errorlog&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--error-logfile&quot;</span><span class="s2">, </span><span class="s3">&quot;--log-file&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s3">'-'</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The Error log file to write to. 
+ 
+        Using ``'-'`` for FILE makes gunicorn log to stderr. 
+ 
+        .. versionchanged:: 19.2 
+           Log to stderr by default. 
+ 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Loglevel(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;loglevel&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-level&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;LEVEL&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s3">&quot;info&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The granularity of Error log outputs. 
+ 
+        Valid level names are: 
+ 
+        * ``'debug'`` 
+        * ``'info'`` 
+        * ``'warning'`` 
+        * ``'error'`` 
+        * ``'critical'`` 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">CaptureOutput(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;capture_output&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--capture-output&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">'store_true'</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Redirect stdout/stderr to specified file in :ref:`errorlog`. 
+ 
+        .. versionadded:: 19.6 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LoggerClass(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;logger_class&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--logger-class&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_class</span>
+    <span class="s1">default = </span><span class="s3">&quot;gunicorn.glogging.Logger&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">The logger you want to use to log events in Gunicorn. 
+ 
+        The default class (``gunicorn.glogging.Logger``) handles most 
+        normal usages in logging. It provides error and access logging. 
+ 
+        You can provide your own logger by giving Gunicorn a Python path to a 
+        class that quacks like ``gunicorn.glogging.Logger``. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LogConfig(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;logconfig&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-config&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">The log config file to use. 
+    Gunicorn uses the standard Python logging module's Configuration 
+    file format. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LogConfigDict(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;logconfig_dict&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">validator = validate_dict</span>
+    <span class="s1">default = {}</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">The log config dictionary to use, using the standard Python 
+    logging module's dictionary configuration format. This option 
+    takes precedence over the :ref:`logconfig` and :ref:`logConfigJson` options, 
+    which uses the older file configuration format and JSON 
+    respectively. 
+ 
+    Format: https://docs.python.org/3/library/logging.config.html#logging.config.dictConfig 
+ 
+    For more context you can look at the default configuration dictionary for logging, 
+    which can be found at ``gunicorn.glogging.CONFIG_DEFAULTS``. 
+ 
+    .. versionadded:: 19.8 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">LogConfigJson(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;logconfig_json&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-config-json&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">The log config to read config from a JSON file 
+ 
+    Format: https://docs.python.org/3/library/logging.config.html#logging.config.jsonConfig 
+ 
+    .. versionadded:: 20.0 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">SyslogTo(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;syslog_addr&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-syslog-to&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;SYSLOG_ADDR&quot;</span>
+    <span class="s1">validator = validate_string</span>
+
+    <span class="s2">if </span><span class="s1">PLATFORM == </span><span class="s3">&quot;darwin&quot;</span><span class="s1">:</span>
+        <span class="s1">default = </span><span class="s3">&quot;unix:///var/run/syslog&quot;</span>
+    <span class="s2">elif </span><span class="s1">PLATFORM </span><span class="s2">in </span><span class="s1">(</span><span class="s3">'freebsd'</span><span class="s2">, </span><span class="s3">'dragonfly'</span><span class="s2">, </span><span class="s1">):</span>
+        <span class="s1">default = </span><span class="s3">&quot;unix:///var/run/log&quot;</span>
+    <span class="s2">elif </span><span class="s1">PLATFORM == </span><span class="s3">&quot;openbsd&quot;</span><span class="s1">:</span>
+        <span class="s1">default = </span><span class="s3">&quot;unix:///dev/log&quot;</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">default = </span><span class="s3">&quot;udp://localhost:514&quot;</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Address to send syslog messages. 
+ 
+    Address is a string of the form: 
+ 
+    * ``unix://PATH#TYPE`` : for unix domain socket. ``TYPE`` can be ``stream`` 
+      for the stream driver or ``dgram`` for the dgram driver. 
+      ``stream`` is the default. 
+    * ``udp://HOST:PORT`` : for UDP sockets 
+    * ``tcp://HOST:PORT`` : for TCP sockets 
+ 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Syslog(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;syslog&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-syslog&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">'store_true'</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Send *Gunicorn* logs to syslog. 
+ 
+    .. versionchanged:: 19.8 
+       You can now disable sending access logs by using the 
+       :ref:`disable-redirect-access-to-syslog` setting. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">SyslogPrefix(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;syslog_prefix&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-syslog-prefix&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;SYSLOG_PREFIX&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Makes Gunicorn use the parameter as program-name in the syslog entries. 
+ 
+    All entries will be prefixed by ``gunicorn.&lt;prefix&gt;``. By default the 
+    program name is the name of the process. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">SyslogFacility(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;syslog_facility&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--log-syslog-facility&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;SYSLOG_FACILITY&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s3">&quot;user&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Syslog facility name 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">EnableStdioInheritance(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;enable_stdio_inheritance&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-R&quot;</span><span class="s2">, </span><span class="s3">&quot;--enable-stdio-inheritance&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Enable stdio inheritance. 
+ 
+    Enable inheritance for stdio file descriptors in daemon mode. 
+ 
+    Note: To disable the Python stdout buffering, you can to set the user 
+    environment variable ``PYTHONUNBUFFERED`` . 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s0"># statsD monitoring</span>
+<span class="s2">class </span><span class="s1">StatsdHost(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;statsd_host&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--statsd-host&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STATSD_ADDR&quot;</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">validator = validate_statsd_address</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">The address of the StatsD server to log to. 
+ 
+    Address is a string of the form: 
+ 
+    * ``unix://PATH`` : for a unix domain socket. 
+    * ``HOST:PORT`` : for a network address 
+ 
+    .. versionadded:: 19.1 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s0"># Datadog Statsd (dogstatsd) tags. https://docs.datadoghq.com/developers/dogstatsd/</span>
+<span class="s2">class </span><span class="s1">DogstatsdTags(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;dogstatsd_tags&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--dogstatsd-tags&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;DOGSTATSD_TAGS&quot;</span>
+    <span class="s1">default = </span><span class="s3">&quot;&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">A comma-delimited list of datadog statsd (dogstatsd) tags to append to 
+    statsd metrics. 
+ 
+    .. versionadded:: 20 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">StatsdPrefix(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;statsd_prefix&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Logging&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--statsd-prefix&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STATSD_PREFIX&quot;</span>
+    <span class="s1">default = </span><span class="s3">&quot;&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Prefix to use when emitting statsd metrics (a trailing ``.`` is added, 
+    if not provided). 
+ 
+    .. versionadded:: 19.2 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Procname(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;proc_name&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Process Naming&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;-n&quot;</span><span class="s2">, </span><span class="s3">&quot;--name&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">A base to use with setproctitle for process naming. 
+ 
+        This affects things like ``ps`` and ``top``. If you're going to be 
+        running more than one instance of Gunicorn you'll probably want to set a 
+        name to tell them apart. This requires that you install the setproctitle 
+        module. 
+ 
+        If not set, the *default_proc_name* setting will be used. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">DefaultProcName(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;default_proc_name&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Process Naming&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s3">&quot;gunicorn&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Internal setting that is adjusted for each type of application. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PythonPath(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;pythonpath&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--pythonpath&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">A comma-separated list of directories to add to the Python path. 
+ 
+        e.g. 
+        ``'/home/djangoprojects/myproject,/home/python/mylibrary'``. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Paste(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;paste&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--paste&quot;</span><span class="s2">, </span><span class="s3">&quot;--paster&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;STRING&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Load a PasteDeploy config file. The argument may contain a ``#`` 
+        symbol followed by the name of an app section from the config file, 
+        e.g. ``production.ini#admin``. 
+ 
+        At this time, using alternate server blocks is not supported. Use the 
+        command line arguments to control server configuration instead. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">OnStarting(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;on_starting&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">on_starting(server):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(on_starting)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just before the master process is initialized. 
+ 
+        The callable needs to accept a single instance variable for the Arbiter. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">OnReload(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;on_reload&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">on_reload(server):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(on_reload)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called to recycle workers during a reload via SIGHUP. 
+ 
+        The callable needs to accept a single instance variable for the Arbiter. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WhenReady(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;when_ready&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">when_ready(server):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(when_ready)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after the server is started. 
+ 
+        The callable needs to accept a single instance variable for the Arbiter. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Prefork(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;pre_fork&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">2</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">pre_fork(server</span><span class="s2">, </span><span class="s1">worker):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(pre_fork)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just before a worker is forked. 
+ 
+        The callable needs to accept two instance variables for the Arbiter and 
+        new Worker. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Postfork(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;post_fork&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">2</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">post_fork(server</span><span class="s2">, </span><span class="s1">worker):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(post_fork)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after a worker has been forked. 
+ 
+        The callable needs to accept two instance variables for the Arbiter and 
+        new Worker. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PostWorkerInit(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;post_worker_init&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">post_worker_init(worker):</span>
+        <span class="s2">pass</span>
+
+    <span class="s1">default = staticmethod(post_worker_init)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after a worker has initialized the application. 
+ 
+        The callable needs to accept one instance variable for the initialized 
+        Worker. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerInt(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;worker_int&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">worker_int(worker):</span>
+        <span class="s2">pass</span>
+
+    <span class="s1">default = staticmethod(worker_int)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after a worker exited on SIGINT or SIGQUIT. 
+ 
+        The callable needs to accept one instance variable for the initialized 
+        Worker. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerAbort(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;worker_abort&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">worker_abort(worker):</span>
+        <span class="s2">pass</span>
+
+    <span class="s1">default = staticmethod(worker_abort)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called when a worker received the SIGABRT signal. 
+ 
+        This call generally happens on timeout. 
+ 
+        The callable needs to accept one instance variable for the initialized 
+        Worker. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PreExec(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;pre_exec&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">pre_exec(server):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(pre_exec)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just before a new master process is forked. 
+ 
+        The callable needs to accept a single instance variable for the Arbiter. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PreRequest(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;pre_request&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">2</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">pre_request(worker</span><span class="s2">, </span><span class="s1">req):</span>
+        <span class="s1">worker.log.debug(</span><span class="s3">&quot;%s %s&quot;</span><span class="s2">, </span><span class="s1">req.method</span><span class="s2">, </span><span class="s1">req.path)</span>
+    <span class="s1">default = staticmethod(pre_request)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just before a worker processes the request. 
+ 
+        The callable needs to accept two instance variables for the Worker and 
+        the Request. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PostRequest(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;post_request&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_post_request</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">post_request(worker</span><span class="s2">, </span><span class="s1">req</span><span class="s2">, </span><span class="s1">environ</span><span class="s2">, </span><span class="s1">resp):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(post_request)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called after a worker processes the request. 
+ 
+        The callable needs to accept two instance variables for the Worker and 
+        the Request. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ChildExit(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;child_exit&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">2</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">child_exit(server</span><span class="s2">, </span><span class="s1">worker):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(child_exit)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after a worker has been exited, in the master process. 
+ 
+        The callable needs to accept two instance variables for the Arbiter and 
+        the just-exited Worker. 
+ 
+        .. versionadded:: 19.7 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">WorkerExit(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;worker_exit&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">2</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">worker_exit(server</span><span class="s2">, </span><span class="s1">worker):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(worker_exit)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after a worker has been exited, in the worker process. 
+ 
+        The callable needs to accept two instance variables for the Arbiter and 
+        the just-exited Worker. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">NumWorkersChanged(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;nworkers_changed&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">3</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">nworkers_changed(server</span><span class="s2">, </span><span class="s1">new_value</span><span class="s2">, </span><span class="s1">old_value):</span>
+        <span class="s2">pass</span>
+    <span class="s1">default = staticmethod(nworkers_changed)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just after *num_workers* has been changed. 
+ 
+        The callable needs to accept an instance variable of the Arbiter and 
+        two integers of number of workers after and before change. 
+ 
+        If the number of workers is set for the first time, *old_value* would 
+        be ``None``. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">OnExit(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;on_exit&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">1</span><span class="s1">)</span>
+
+    <span class="s2">def </span><span class="s1">on_exit(server):</span>
+        <span class="s2">pass</span>
+
+    <span class="s1">default = staticmethod(on_exit)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called just before exiting Gunicorn. 
+ 
+        The callable needs to accept a single instance variable for the Arbiter. 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">NewSSLContext(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;ssl_context&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Hooks&quot;</span>
+    <span class="s1">validator = validate_callable(</span><span class="s4">2</span><span class="s1">)</span>
+    <span class="s1">type = callable</span>
+
+    <span class="s2">def </span><span class="s1">ssl_context(config</span><span class="s2">, </span><span class="s1">default_ssl_context_factory):</span>
+        <span class="s2">return </span><span class="s1">default_ssl_context_factory()</span>
+
+    <span class="s1">default = staticmethod(ssl_context)</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Called when SSLContext is needed. 
+ 
+        Allows customizing SSL context. 
+ 
+        The callable needs to accept an instance variable for the Config and 
+        a factory function that returns default SSLContext which is initialized 
+        with certificates, private key, cert_reqs, and ciphers according to 
+        config and can be further customized by the callable. 
+        The callable needs to return SSLContext object. 
+ 
+        Following example shows a configuration file that sets the minimum TLS version to 1.3: 
+ 
+        .. code-block:: python 
+ 
+            def ssl_context(conf, default_ssl_context_factory): 
+                import ssl 
+                context = default_ssl_context_factory() 
+                context.minimum_version = ssl.TLSVersion.TLSv1_3 
+                return context 
+ 
+        .. versionadded:: 20.2 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ProxyProtocol(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;proxy_protocol&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--proxy-protocol&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Enable detect PROXY protocol (PROXY mode). 
+ 
+        Allow using HTTP and Proxy together. It may be useful for work with 
+        stunnel as HTTPS frontend and Gunicorn as HTTP server. 
+ 
+        PROXY protocol: http://haproxy.1wt.eu/download/1.5/doc/proxy-protocol.txt 
+ 
+        Example for stunnel config:: 
+ 
+            [https] 
+            protocol = proxy 
+            accept  = 443 
+            connect = 80 
+            cert = /etc/ssl/certs/stunnel.pem 
+            key = /etc/ssl/certs/stunnel.key 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">ProxyAllowFrom(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;proxy_allow_ips&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--proxy-allow-from&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_string_to_list</span>
+    <span class="s1">default = </span><span class="s3">&quot;127.0.0.1&quot;</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Front-end's IPs from which allowed accept proxy requests (comma separate). 
+ 
+        Set to ``*`` to disable checking of Front-end IPs (useful for setups 
+        where you don't know in advance the IP address of Front-end, but 
+        you still trust the environment) 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">KeyFile(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;keyfile&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--keyfile&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">SSL key file 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">CertFile(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;certfile&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--certfile&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">SSL certificate file 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">SSLVersion(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;ssl_version&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--ssl-version&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_ssl_version</span>
+
+    <span class="s2">if </span><span class="s1">hasattr(ssl</span><span class="s2">, </span><span class="s3">&quot;PROTOCOL_TLS&quot;</span><span class="s1">):</span>
+        <span class="s1">default = ssl.PROTOCOL_TLS</span>
+    <span class="s2">else</span><span class="s1">:</span>
+        <span class="s1">default = ssl.PROTOCOL_SSLv23</span>
+
+    <span class="s1">default = ssl.PROTOCOL_SSLv23</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">SSL version to use (see stdlib ssl module's). 
+ 
+    .. deprecated:: 20.2 
+       The option is deprecated and it is currently ignored. Use :ref:`ssl-context` instead. 
+ 
+    ============= ============ 
+    --ssl-version Description 
+    ============= ============ 
+    SSLv3         SSLv3 is not-secure and is strongly discouraged. 
+    SSLv23        Alias for TLS. Deprecated in Python 3.6, use TLS. 
+    TLS           Negotiate highest possible version between client/server. 
+                  Can yield SSL. (Python 3.6+) 
+    TLSv1         TLS 1.0 
+    TLSv1_1       TLS 1.1 (Python 3.4+) 
+    TLSv1_2       TLS 1.2 (Python 3.4+) 
+    TLS_SERVER    Auto-negotiate the highest protocol version like TLS, 
+                  but only support server-side SSLSocket connections. 
+                  (Python 3.6+) 
+    ============= ============ 
+ 
+    .. versionchanged:: 19.7 
+       The default value has been changed from ``ssl.PROTOCOL_TLSv1`` to 
+       ``ssl.PROTOCOL_SSLv23``. 
+    .. versionchanged:: 20.0 
+       This setting now accepts string names based on ``ssl.PROTOCOL_`` 
+       constants. 
+    .. versionchanged:: 20.0.1 
+       The default value has been changed from ``ssl.PROTOCOL_SSLv23`` to 
+       ``ssl.PROTOCOL_TLS`` when Python &gt;= 3.6 . 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">CertReqs(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;cert_reqs&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--cert-reqs&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_pos_int</span>
+    <span class="s1">default = ssl.CERT_NONE</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Whether client certificate is required (see stdlib ssl module's) 
+ 
+    ===========  =========================== 
+    --cert-reqs      Description 
+    ===========  =========================== 
+    `0`          no client veirifcation 
+    `1`          ssl.CERT_OPTIONAL 
+    `2`          ssl.CERT_REQUIRED 
+    ===========  =========================== 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">CACerts(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;ca_certs&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--ca-certs&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;FILE&quot;</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">CA certificates file 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">SuppressRaggedEOFs(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;suppress_ragged_eofs&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--suppress-ragged-eofs&quot;</span><span class="s1">]</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">True</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Suppress ragged EOFs (see stdlib ssl module's) 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">DoHandshakeOnConnect(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;do_handshake_on_connect&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--do-handshake-on-connect&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">Whether to perform SSL handshake on socket connect (see stdlib ssl module's) 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">Ciphers(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;ciphers&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;SSL&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--ciphers&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_string</span>
+    <span class="s1">default = </span><span class="s2">None</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+    </span><span class="s3">SSL Cipher suite to use, in the format of an OpenSSL cipher list. 
+ 
+    By default we use the default cipher list from Python's ``ssl`` module, 
+    which contains ciphers considered strong at the time of each Python 
+    release. 
+ 
+    As a recommended alternative, the Open Web App Security Project (OWASP) 
+    offers `a vetted set of strong cipher strings rated A+ to C- 
+    &lt;https://www.owasp.org/index.php/TLS_Cipher_String_Cheat_Sheet&gt;`_. 
+    OWASP provides details on user-agent compatibility at each security level. 
+ 
+    See the `OpenSSL Cipher List Format Documentation 
+    &lt;https://www.openssl.org/docs/manmaster/man1/ciphers.html#CIPHER-LIST-FORMAT&gt;`_ 
+    for details on the format of an OpenSSL cipher list. 
+    &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">PasteGlobalConf(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;raw_paste_global_conf&quot;</span>
+    <span class="s1">action = </span><span class="s3">&quot;append&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--paste-global&quot;</span><span class="s1">]</span>
+    <span class="s1">meta = </span><span class="s3">&quot;CONF&quot;</span>
+    <span class="s1">validator = validate_list_string</span>
+    <span class="s1">default = []</span>
+
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Set a PasteDeploy global config variable in ``key=value`` form. 
+ 
+        The option can be specified multiple times. 
+ 
+        The variables are passed to the the PasteDeploy entrypoint. Example:: 
+ 
+            $ gunicorn -b 127.0.0.1:8000 --paste development.ini --paste-global FOO=1 --paste-global BAR=2 
+ 
+        .. versionadded:: 19.7 
+        &quot;&quot;&quot;</span>
+
+
+<span class="s2">class </span><span class="s1">StripHeaderSpaces(Setting):</span>
+    <span class="s1">name = </span><span class="s3">&quot;strip_header_spaces&quot;</span>
+    <span class="s1">section = </span><span class="s3">&quot;Server Mechanics&quot;</span>
+    <span class="s1">cli = [</span><span class="s3">&quot;--strip-header-spaces&quot;</span><span class="s1">]</span>
+    <span class="s1">validator = validate_bool</span>
+    <span class="s1">action = </span><span class="s3">&quot;store_true&quot;</span>
+    <span class="s1">default = </span><span class="s2">False</span>
+    <span class="s1">desc = </span><span class="s3">&quot;&quot;&quot;</span><span class="s2">\ 
+        </span><span class="s3">Strip spaces present between the header name and the the ``:``. 
+ 
+        This is known to induce vulnerabilities and is not compliant with the HTTP/1.1 standard. 
+        See https://portswigger.net/research/http-desync-attacks-request-smuggling-reborn. 
+ 
+        Use with care and only if necessary. 
+        &quot;&quot;&quot;</span>
+</pre>
+</body>
+</html>
