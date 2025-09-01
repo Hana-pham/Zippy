@@ -32,10 +32,10 @@ This creates **higher costs, longer delivery times, and reduced quality** for bu
 ---
 
 ## 3. Goals & Success Metrics
-- ⏱ Reduce design-to-code conversion time by **≥70%**.  
-- 🤖 Automate at least **80%** of code scaffolding.  
-- 🖼 Provide **preview & export workflows** for usability.  
-- 💻 Deliver **clean, maintainable code** for dev integration.  
+- Reduce design-to-code conversion time by **≥70%**.  
+- Automate at least **80%** of code scaffolding.  
+- Provide **preview & export workflows** for usability.  
+- Deliver **clean, maintainable code** for dev integration.  
 
 ---
 
@@ -55,10 +55,10 @@ This creates **higher costs, longer delivery times, and reduced quality** for bu
 ---
 
 ## 5. My Contributions (Hana Pham)
-- 🌐 Designed and implemented **responsive frontend UI** (CSS/Bootstrap).  
-- 🔌 Built **Figma API integration** + error handling workflows.  
-- 🧠 Developed **Python AI pipeline** (`analyze.py`) for screen clustering.  
-- 📑 Authored major documentation (Proposal, Project Plan, SAD Report).  
+- Designed and implemented **responsive frontend UI** (CSS/Bootstrap).  
+- Built **Figma API integration** + error handling workflows.  
+- Developed **Python AI pipeline** (`analyze.py`) for screen clustering.  
+- Authored major documentation (Proposal, Project Plan, SAD Report).  
 
 ---
 
