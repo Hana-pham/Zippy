@@ -74,3 +74,14 @@ Using **Python, Figma API, and GPT-4 Vision**, it generates HTML/CSS scaffolding
 ---
 
 ## 📂 Repo Structure
+├── analyze.py # AI clustering + embeddings
+├── displayJS.js # Frontend display logic
+├── displaycss.css # UI styles
+├── errorPageJS.js # Error handling
+├── errorPagecss.css # Error page styles
+├── index.css # Landing page styles
+├── PRD.md # Full Product Requirements Document
+├── docs/ # University reports
+│ ├── PX_ProjectProposal.pdf
+│ ├── SAD_Report_Final_PX.pdf
+│ └── PX_PA2409.pdf
