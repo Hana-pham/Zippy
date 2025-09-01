@@ -1,14 +1,4 @@
-Please install the following libraries to run the application:
 
-pip install flask
-pip install flask-socketio
-pip install requests
-pip install werkzeug
-pip install Pillow
-pip install torch torchvision
-pip install openai
-pip install transformers
-pip install certifi
 
 # Zippy – AI-Powered Figma-to-Code Generator
 
@@ -22,7 +12,17 @@ Zippy automates the **design-to-code process** that is normally slow, inconsiste
 Using **Python, Figma API, and GPT-4 Vision**, it generates HTML/CSS scaffolding with ~80% accuracy — cutting conversion time by 70%.
 
 👉 For full technical breakdown, see the [PRD.md](./PRD.md).  
+Please install the following libraries to run the application:
 
+pip install flask
+pip install flask-socketio
+pip install requests
+pip install werkzeug
+pip install Pillow
+pip install torch torchvision
+pip install openai
+pip install transformers
+pip install certifi
 ---
 
 ## Features
